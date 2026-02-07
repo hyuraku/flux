@@ -1,0 +1,32 @@
+<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="iconGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a78bfa"/>
+      <stop offset="100%" stop-color="#22d3ee"/>
+    </linearGradient>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a0a12"/>
+      <stop offset="100%" stop-color="#12081f"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="1" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="32" height="32" rx="6" fill="url(#bgGradient)"/>
+
+  <!-- 6-pointed star representing data transfer -->
+  <g filter="url(#glow)">
+    <!-- Horizontal diamond -->
+    <polygon points="16,8 22,16 16,24 10,16" fill="url(#iconGradient)" opacity="0.9"/>
+    <!-- Left-right arrows suggesting transfer -->
+    <path d="M 6 16 L 10 13 L 10 19 Z" fill="#a78bfa"/>
+    <path d="M 26 16 L 22 13 L 22 19 Z" fill="#22d3ee"/>
+  </g>
+
+  <!-- Center dot -->
+  <circle cx="16" cy="16" r="2" fill="#fff" opacity="0.9"/>
+</svg>

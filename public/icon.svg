@@ -1,0 +1,70 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="iconGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a78bfa"/>
+      <stop offset="50%" stop-color="#c4b5fd"/>
+      <stop offset="100%" stop-color="#22d3ee"/>
+    </linearGradient>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a0a12"/>
+      <stop offset="100%" stop-color="#12081f"/>
+    </linearGradient>
+    <radialGradient id="glowPurple" cx="30%" cy="70%" r="50%">
+      <stop offset="0%" stop-color="#7c3aed" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#0a0a12" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowCyan" cx="70%" cy="30%" r="50%">
+      <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#0a0a12" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" rx="96" fill="url(#bgGradient)"/>
+
+  <!-- Nebula glow -->
+  <rect width="512" height="512" rx="96" fill="url(#glowPurple)"/>
+  <rect width="512" height="512" rx="96" fill="url(#glowCyan)"/>
+
+  <!-- Stars -->
+  <g fill="#fff" opacity="0.5">
+    <circle cx="80" cy="100" r="2"/>
+    <circle cx="420" cy="80" r="2.5"/>
+    <circle cx="100" cy="400" r="2"/>
+    <circle cx="440" cy="420" r="2"/>
+    <circle cx="200" cy="60" r="1.5"/>
+    <circle cx="350" cy="450" r="1.5"/>
+  </g>
+
+  <!-- Orbital ring -->
+  <ellipse cx="256" cy="256" rx="160" ry="50" fill="none" stroke="#4f46e5" stroke-width="1.5" opacity="0.2"/>
+
+  <!-- Data stream -->
+  <path d="M 120 256 Q 200 200, 256 256 Q 312 312, 392 256"
+        fill="none"
+        stroke="url(#iconGradient)"
+        stroke-width="6"
+        stroke-linecap="round"
+        filter="url(#glow)"
+        opacity="0.7"/>
+
+  <!-- Nodes -->
+  <circle cx="100" cy="256" r="20" fill="#a78bfa" filter="url(#glow)"/>
+  <circle cx="412" cy="256" r="20" fill="#22d3ee" filter="url(#glow)"/>
+
+  <!-- flux text -->
+  <text x="256" y="280"
+        font-family="system-ui, -apple-system, sans-serif"
+        font-size="120"
+        font-weight="200"
+        text-anchor="middle"
+        fill="#f8fafc"
+        filter="url(#glow)">flux</text>
+</svg>
