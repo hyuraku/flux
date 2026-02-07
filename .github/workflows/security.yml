@@ -1,0 +1,59 @@
+name: Security Scan
+
+on:
+  schedule:
+    - cron: '0 0 * * 0' # 毎週日曜日
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run security audit
+        run: npm audit --audit-level=moderate
+
+  secret-scanning:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for committed secrets
+        run: |
+          set -o pipefail
+
+          # .envファイルがコミットされていないかチェック
+          if git ls-files | grep -E "^\.env$|^\.env\..+$" | grep -v ".env.example"; then
+            echo "Error: .env file is committed to the repository"
+            exit 1
+          fi
+
+          # APIキーパターンのチェック
+          SECRETS=$(git log -p --all | grep -E "(sk-[a-zA-Z0-9]{20,}|AKIA[0-9A-Z]{16})" | head -5 || true)
+          if [ -n "$SECRETS" ]; then
+            echo "Warning: Potential API key found in git history"
+            echo "$SECRETS"
+            exit 1
+          fi
+
+          echo "No secrets detected"
