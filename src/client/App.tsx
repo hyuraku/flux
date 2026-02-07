@@ -259,6 +259,38 @@ function AppContent() {
                   </div>
                 </div>
               </section>
+
+              <section className="space-y-8">
+                <h2 className="text-display text-2xl text-white text-center">FAQ</h2>
+                <div className="space-y-4">
+                  <div className="group relative pl-5 py-3 border-l-2 border-transparent hover:border-l-0 transition-all duration-300"
+                       style={{ borderImage: 'linear-gradient(180deg, #a78bfa, #22d3ee) 1' }}>
+                    <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-violet-400 to-cyan-400 opacity-60 group-hover:opacity-100 transition-opacity" />
+                    <h3 className="text-white/90 text-sm font-medium mb-1 group-hover:text-white transition-colors">Is there a file size limit?</h3>
+                    <p className="text-zinc-500 text-xs leading-relaxed">Up to 2GB per transfer. Files go directly between devices.</p>
+                  </div>
+                  <div className="group relative pl-5 py-3">
+                    <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-violet-400 to-cyan-400 opacity-60 group-hover:opacity-100 transition-opacity" />
+                    <h3 className="text-white/90 text-sm font-medium mb-1 group-hover:text-white transition-colors">Are my files stored on a server?</h3>
+                    <p className="text-zinc-500 text-xs leading-relaxed">No. Files go directly from sender to receiver via P2P.</p>
+                  </div>
+                  <div className="group relative pl-5 py-3">
+                    <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-violet-400 to-cyan-400 opacity-60 group-hover:opacity-100 transition-opacity" />
+                    <h3 className="text-white/90 text-sm font-medium mb-1 group-hover:text-white transition-colors">Is it secure?</h3>
+                    <p className="text-zinc-500 text-xs leading-relaxed">Yes. All transfers are end-to-end encrypted.</p>
+                  </div>
+                  <div className="group relative pl-5 py-3">
+                    <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-violet-400 to-cyan-400 opacity-60 group-hover:opacity-100 transition-opacity" />
+                    <h3 className="text-white/90 text-sm font-medium mb-1 group-hover:text-white transition-colors">Does it work on mobile?</h3>
+                    <p className="text-zinc-500 text-xs leading-relaxed">Yes. Works on any modern browser.</p>
+                  </div>
+                  <div className="group relative pl-5 py-3">
+                    <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-violet-400 to-cyan-400 opacity-60 group-hover:opacity-100 transition-opacity" />
+                    <h3 className="text-white/90 text-sm font-medium mb-1 group-hover:text-white transition-colors">What happens if the connection drops?</h3>
+                    <p className="text-zinc-500 text-xs leading-relaxed">The transfer will stop. You'll need to start again.</p>
+                  </div>
+                </div>
+              </section>
             </div>
           )}
 
