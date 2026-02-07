@@ -326,9 +326,9 @@ describe('TransferManager', () => {
       expect((mgr as any).options.enableCompression).toBe(true);
     });
 
-    it('デフォルトで暗号化が無効', () => {
+    it('デフォルトで暗号化が有効', () => {
       const mgr = new TransferManager();
-      expect((mgr as any).options.enableEncryption).toBe(false);
+      expect((mgr as any).options.enableEncryption).toBe(true);
     });
 
     it('デフォルトチャンクサイズは16KB', () => {
