@@ -1,0 +1,425 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+@import "tailwindcss";
+@config "../../../tailwind.config.js";
+
+/* ========================================
+   CSS Variables - Cosmic Theme
+   ======================================== */
+
+:root {
+  --color-bg-start: #0a0a0f;
+  --color-bg-end: #12121a;
+  --color-surface: rgba(255, 255, 255, 0.03);
+  --color-surface-hover: rgba(255, 255, 255, 0.06);
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border-hover: rgba(255, 255, 255, 0.15);
+
+  --color-primary: #818cf8;
+  --color-primary-glow: rgba(129, 140, 248, 0.4);
+  --color-accent: #22d3ee;
+  --color-accent-glow: rgba(34, 211, 238, 0.3);
+
+  --color-text: #f8fafc;
+  --color-text-muted: rgba(248, 250, 252, 0.5);
+  --color-text-dim: rgba(248, 250, 252, 0.3);
+
+  --font-display: 'Outfit', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ========================================
+   Base Styles
+   ======================================== */
+
+* {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html {
+  font-family: var(--font-display);
+  background: var(--color-bg-start);
+}
+
+body {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: linear-gradient(135deg, var(--color-bg-start) 0%, var(--color-bg-end) 100%);
+  color: var(--color-text);
+  overflow-x: hidden;
+  margin: 0;
+}
+
+::selection {
+  background: var(--color-primary);
+  color: white;
+}
+
+/* ========================================
+   Animated Background
+   ======================================== */
+
+.cosmic-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+}
+
+.cosmic-bg::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background:
+    radial-gradient(ellipse at 20% 20%, rgba(99, 102, 241, 0.15) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 80%, rgba(34, 211, 238, 0.1) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 50%, rgba(139, 92, 246, 0.08) 0%, transparent 60%);
+  animation: cosmicDrift 30s ease-in-out infinite;
+}
+
+@keyframes cosmicDrift {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  33% { transform: translate(2%, 2%) rotate(1deg); }
+  66% { transform: translate(-1%, 1%) rotate(-1deg); }
+}
+
+.cosmic-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+  background-size: 60px 60px;
+  mask-image: radial-gradient(ellipse at center, black 0%, transparent 70%);
+}
+
+/* ========================================
+   Typography
+   ======================================== */
+
+.text-display {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.text-mono {
+  font-family: var(--font-mono);
+  font-feature-settings: 'tnum' on, 'lnum' on;
+}
+
+/* ========================================
+   Giant Code Display
+   ======================================== */
+
+.code-giant {
+  font-family: var(--font-mono);
+  font-size: clamp(4rem, 15vw, 8rem);
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  color: var(--color-text);
+  text-shadow:
+    0 0 40px var(--color-primary-glow),
+    0 0 80px var(--color-primary-glow);
+  animation: codeGlow 3s ease-in-out infinite alternate;
+}
+
+@keyframes codeGlow {
+  from {
+    text-shadow:
+      0 0 40px var(--color-primary-glow),
+      0 0 80px var(--color-primary-glow);
+  }
+  to {
+    text-shadow:
+      0 0 60px var(--color-primary-glow),
+      0 0 120px var(--color-primary-glow),
+      0 0 180px rgba(129, 140, 248, 0.2);
+  }
+}
+
+/* ========================================
+   Code Input Digits
+   ======================================== */
+
+.digit-input {
+  width: 4.5rem;
+  height: 6rem;
+  background: var(--color-surface);
+  border: 2px solid var(--color-border);
+  border-radius: 16px;
+  font-family: var(--font-mono);
+  font-size: 2.5rem;
+  font-weight: 600;
+  color: var(--color-text);
+  text-align: center;
+  caret-color: var(--color-primary);
+  transition: all 0.3s var(--ease-out-expo);
+  outline: none;
+}
+
+.digit-input:focus {
+  border-color: var(--color-primary);
+  box-shadow:
+    0 0 0 4px var(--color-primary-glow),
+    0 0 30px var(--color-primary-glow);
+  transform: translateY(-4px);
+}
+
+.digit-input::placeholder {
+  color: var(--color-text-dim);
+}
+
+/* ========================================
+   Buttons
+   ======================================== */
+
+.btn-cosmic {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1.25rem 2rem;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.1rem;
+  color: white;
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  border: none;
+  border-radius: 16px;
+  cursor: pointer;
+  overflow: hidden;
+  transition: all 0.4s var(--ease-out-expo);
+}
+
+.btn-cosmic svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+}
+
+.btn-cosmic::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, #818cf8 0%, #a78bfa 100%);
+  opacity: 0;
+  transition: opacity 0.4s var(--ease-out-expo);
+}
+
+.btn-cosmic:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 10px 40px -10px rgba(99, 102, 241, 0.5),
+    0 0 20px rgba(99, 102, 241, 0.3);
+}
+
+.btn-cosmic:hover::before {
+  opacity: 1;
+}
+
+.btn-cosmic:active {
+  transform: translateY(0);
+}
+
+.btn-cosmic span,
+.btn-cosmic svg {
+  position: relative;
+  z-index: 1;
+}
+
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.875rem 1.75rem;
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 1rem;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s var(--ease-out-expo);
+}
+
+.btn-ghost svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+}
+
+.btn-ghost:hover {
+  color: var(--color-text);
+  border-color: var(--color-border-hover);
+  background: var(--color-surface);
+}
+
+/* ========================================
+   Drop Zone
+   ======================================== */
+
+.drop-zone {
+  position: relative;
+  padding: 3rem 2rem;
+  border: 2px dashed var(--color-border);
+  border-radius: 20px;
+  background: var(--color-surface);
+  transition: all 0.4s var(--ease-out-expo);
+  cursor: pointer;
+}
+
+.drop-zone:hover,
+.drop-zone.active {
+  border-color: var(--color-primary);
+  background: rgba(99, 102, 241, 0.05);
+}
+
+.drop-zone.active {
+  transform: scale(1.02);
+  box-shadow: 0 0 40px var(--color-primary-glow);
+}
+
+.drop-zone svg {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+/* ========================================
+   File Item
+   ======================================== */
+
+.file-item {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  transition: all 0.3s var(--ease-out-expo);
+}
+
+.file-item:hover {
+  background: var(--color-surface-hover);
+  border-color: var(--color-border-hover);
+}
+
+.file-item svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+/* ========================================
+   Status Indicator
+   ======================================== */
+
+.status-pulse {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  box-shadow: 0 0 20px var(--color-accent-glow);
+  animation: statusPulse 2s ease-in-out infinite;
+}
+
+@keyframes statusPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.2);
+  }
+}
+
+/* ========================================
+   Animations
+   ======================================== */
+
+.animate-in {
+  animation: animateIn 0.6s var(--ease-out-expo) forwards;
+}
+
+@keyframes animateIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.5s var(--ease-out-back) forwards;
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ========================================
+   Utilities
+   ======================================== */
+
+.text-muted {
+  color: var(--color-text-muted);
+}
+
+.text-dim {
+  color: var(--color-text-dim);
+}
+
+.text-white {
+  color: white;
+}
+
+.glow-primary {
+  box-shadow: 0 0 40px var(--color-primary-glow);
+}
+
+/* Smooth scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-hover);
+}
+
+/* Focus visible for accessibility */
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}

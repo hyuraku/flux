@@ -1,0 +1,45 @@
+{
+  "name": "Flux - P2P File Transfer",
+  "short_name": "Flux",
+  "description": "Fast, secure peer-to-peer file transfer using WebRTC",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0f",
+  "theme_color": "#6366f1",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["utilities", "productivity"],
+  "lang": "en",
+  "dir": "ltr",
+  "scope": "/",
+  "prefer_related_applications": false,
+  "shortcuts": [
+    {
+      "name": "Receive Files",
+      "short_name": "Receive",
+      "description": "Generate a code to receive files",
+      "url": "/?mode=receive",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Send Files",
+      "short_name": "Send",
+      "description": "Enter a code to send files",
+      "url": "/?mode=send",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}
