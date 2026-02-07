@@ -4,6 +4,7 @@ import { resolve } from 'path';
 
 export default defineConfig({
   plugins: [react()],
+  base: process.env.GITHUB_PAGES ? '/flux/' : '/',
   resolve: {
     alias: {
       '@': resolve(__dirname, './src/client'),
