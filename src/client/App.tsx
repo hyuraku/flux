@@ -160,36 +160,113 @@ function AppContent() {
         </header>
 
         {/* Main Content */}
-        <main className="flex-1 flex items-center justify-center px-6 pb-12">
+        <main className={`flex-1 px-6 pb-12 ${mode === 'home' ? 'overflow-y-auto' : 'flex items-center justify-center'}`}>
 
           {/* Home Screen */}
           {mode === 'home' && (
-            <div className="w-full max-w-sm space-y-6 animate-scale-in">
-              <button
-                onClick={handleReceiveMode}
-                className="btn-cosmic w-full py-5 text-lg"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-                </svg>
-                <span>Receive</span>
-              </button>
+            <div className="w-full max-w-2xl mx-auto py-8 space-y-16 animate-scale-in">
+              {/* Action Buttons */}
+              <div className="max-w-sm mx-auto space-y-6">
+                <button
+                  onClick={handleReceiveMode}
+                  className="btn-cosmic w-full py-5 text-lg"
+                  aria-label="Receive files"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                  </svg>
+                  <span>Receive</span>
+                </button>
 
-              <div className="flex items-center gap-4">
-                <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-                <span className="text-dim text-xs uppercase tracking-widest">or</span>
-                <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                <div className="flex items-center gap-4">
+                  <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                  <span className="text-dim text-xs uppercase tracking-widest">or</span>
+                  <div className="flex-1 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                </div>
+
+                <button
+                  onClick={handleSendMode}
+                  className="btn-ghost w-full py-4"
+                  aria-label="Send files"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                  </svg>
+                  <span>Send</span>
+                </button>
               </div>
 
-              <button
-                onClick={handleSendMode}
-                className="btn-ghost w-full py-4"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 10l7-7m0 0l7 7m-7-7v18" />
-                </svg>
-                <span>Send</span>
-              </button>
+              {/* What's flux? Section */}
+              <section className="text-center space-y-6">
+                <h2 className="text-display text-2xl text-white">What's flux?</h2>
+                <p className="text-muted text-sm leading-relaxed max-w-md mx-auto">
+                  A fast, privacy-focused file transfer tool. Files are sent directly between devices using WebRTC peer-to-peer technology — no server storage, no upload limits.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4">
+                  <div className="p-4 rounded-xl bg-white/5 border border-white/10">
+                    <div className="w-10 h-10 mx-auto mb-3 rounded-full bg-indigo-500/20 flex items-center justify-center">
+                      <svg className="w-5 h-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                      </svg>
+                    </div>
+                    <h3 className="text-white text-sm font-medium mb-1">End-to-End Encrypted</h3>
+                    <p className="text-dim text-xs">Your files stay private</p>
+                  </div>
+                  <div className="p-4 rounded-xl bg-white/5 border border-white/10">
+                    <div className="w-10 h-10 mx-auto mb-3 rounded-full bg-cyan-500/20 flex items-center justify-center">
+                      <svg className="w-5 h-5 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      </svg>
+                    </div>
+                    <h3 className="text-white text-sm font-medium mb-1">Blazingly Fast</h3>
+                    <p className="text-dim text-xs">Direct P2P transfer</p>
+                  </div>
+                  <div className="p-4 rounded-xl bg-white/5 border border-white/10">
+                    <div className="w-10 h-10 mx-auto mb-3 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                      <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                      </svg>
+                    </div>
+                    <h3 className="text-white text-sm font-medium mb-1">No Server Storage</h3>
+                    <p className="text-dim text-xs">Data never touches our servers</p>
+                  </div>
+                </div>
+              </section>
+
+              {/* How to use Section */}
+              <section className="text-center space-y-6">
+                <h2 className="text-display text-2xl text-white">How to use</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="p-5 rounded-xl bg-white/5 border border-white/10 text-left">
+                    <div className="flex items-center gap-3 mb-3">
+                      <span className="w-8 h-8 rounded-full bg-indigo-500/30 text-indigo-300 flex items-center justify-center text-sm font-bold">1</span>
+                      <h3 className="text-white text-sm font-medium">Open flux on both devices</h3>
+                    </div>
+                    <p className="text-dim text-xs pl-11">Visit this site on the device you want to send from and the device you want to receive on.</p>
+                  </div>
+                  <div className="p-5 rounded-xl bg-white/5 border border-white/10 text-left">
+                    <div className="flex items-center gap-3 mb-3">
+                      <span className="w-8 h-8 rounded-full bg-indigo-500/30 text-indigo-300 flex items-center justify-center text-sm font-bold">2</span>
+                      <h3 className="text-white text-sm font-medium">Get code on receiver</h3>
+                    </div>
+                    <p className="text-dim text-xs pl-11">Click "Receive" on the receiving device to get a 4-digit code.</p>
+                  </div>
+                  <div className="p-5 rounded-xl bg-white/5 border border-white/10 text-left">
+                    <div className="flex items-center gap-3 mb-3">
+                      <span className="w-8 h-8 rounded-full bg-indigo-500/30 text-indigo-300 flex items-center justify-center text-sm font-bold">3</span>
+                      <h3 className="text-white text-sm font-medium">Enter code & select files</h3>
+                    </div>
+                    <p className="text-dim text-xs pl-11">Click "Send" on the sending device, enter the code, and choose your files.</p>
+                  </div>
+                  <div className="p-5 rounded-xl bg-white/5 border border-white/10 text-left">
+                    <div className="flex items-center gap-3 mb-3">
+                      <span className="w-8 h-8 rounded-full bg-indigo-500/30 text-indigo-300 flex items-center justify-center text-sm font-bold">4</span>
+                      <h3 className="text-white text-sm font-medium">Transfer!</h3>
+                    </div>
+                    <p className="text-dim text-xs pl-11">Files transfer directly between devices at maximum speed.</p>
+                  </div>
+                </div>
+              </section>
             </div>
           )}
 
@@ -200,13 +277,20 @@ function AppContent() {
               <ConnectionStatus status={connectionStatus} error={error} />
 
               {/* Giant glowing code */}
-              <div className="code-giant select-all cursor-pointer" onClick={handleCopyCode}>
+              <div
+                className="code-giant select-all cursor-pointer"
+                onClick={handleCopyCode}
+                role="button"
+                tabIndex={0}
+                aria-label={`Transfer code ${code || 'generating'}. Click to copy`}
+                onKeyDown={(e) => e.key === 'Enter' && handleCopyCode()}
+              >
                 {code || '----'}
               </div>
 
               {/* Status */}
-              <div className="flex items-center justify-center gap-3">
-                <div className="status-pulse" />
+              <div className="flex items-center justify-center gap-3" role="status" aria-live="polite">
+                <div className="status-pulse" aria-hidden="true" />
                 <span className="text-muted text-sm">
                   {transferStatus === 'waiting' ? 'waiting for sender...' : 'connecting...'}
                 </span>
@@ -218,7 +302,7 @@ function AppContent() {
               </p>
 
               {/* Cancel */}
-              <button onClick={handleBack} className="btn-ghost">
+              <button onClick={handleBack} className="btn-ghost" aria-label="Cancel receiving">
                 Cancel
               </button>
             </div>
@@ -235,7 +319,7 @@ function AppContent() {
                 </div>
 
                 {/* 4-Digit Input */}
-                <div className="flex justify-center gap-3">
+                <div className="flex justify-center gap-3" role="group" aria-label="4-digit transfer code input">
                   {digits.map((digit, i) => (
                     <input
                       key={i}
@@ -248,6 +332,7 @@ function AppContent() {
                       onKeyDown={(e) => handleKeyDown(i, e)}
                       className="digit-input"
                       autoFocus={i === 0}
+                      aria-label={`Digit ${i + 1}`}
                     />
                   ))}
                 </div>
@@ -261,6 +346,10 @@ function AppContent() {
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={handleFileDrop}
                 onClick={handleFileInputClick}
+                role="button"
+                tabIndex={0}
+                aria-label={selectedFiles.length > 0 ? `${selectedFiles.length} file(s) selected` : 'Drop files or click to select'}
+                onKeyDown={(e) => e.key === 'Enter' && handleFileInputClick()}
               >
                 <input
                   id="file-input"
@@ -314,6 +403,7 @@ function AppContent() {
                   onClick={handleTransfer}
                   disabled={transferStatus === 'connecting'}
                   className="btn-cosmic w-full py-5 text-lg animate-scale-in disabled:opacity-50"
+                  aria-label="Transfer files"
                 >
                   {transferStatus === 'connecting' ? (
                     <>
@@ -335,7 +425,7 @@ function AppContent() {
 
               {/* Back Button */}
               <div className="text-center">
-                <button onClick={handleBack} className="btn-ghost">
+                <button onClick={handleBack} className="btn-ghost" aria-label="Back to home">
                   Back
                 </button>
               </div>
@@ -344,7 +434,7 @@ function AppContent() {
 
           {/* Transferring Screen */}
           {mode === 'transferring' && (
-            <div className="w-full max-w-md text-center space-y-10 animate-in">
+            <div className="w-full max-w-md text-center space-y-10 animate-in" role="status" aria-live="polite">
               {/* Status */}
               <div className="space-y-4">
                 <h2 className="text-display text-2xl text-white">
@@ -381,7 +471,7 @@ function AppContent() {
               </div>
 
               {/* Cancel */}
-              <button onClick={handleBack} className="btn-ghost">
+              <button onClick={handleBack} className="btn-ghost" aria-label="Cancel transfer">
                 Cancel
               </button>
             </div>
@@ -389,7 +479,7 @@ function AppContent() {
 
           {/* Completed Screen */}
           {mode === 'completed' && (
-            <div className="text-center space-y-10 animate-scale-in">
+            <div className="text-center space-y-10 animate-scale-in" role="status" aria-live="polite">
               {/* Success Icon */}
               <div className="w-24 h-24 mx-auto rounded-full bg-gradient-to-br from-green-500/20 to-emerald-500/20 flex items-center justify-center">
                 <svg className="w-12 h-12 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -419,7 +509,7 @@ function AppContent() {
               </div>
 
               {/* Done button */}
-              <button onClick={handleBack} className="btn-cosmic px-12">
+              <button onClick={handleBack} className="btn-cosmic px-12" aria-label="Done, back to home">
                 <span>Done</span>
               </button>
             </div>
