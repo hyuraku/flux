@@ -99,10 +99,10 @@ describe('TransferManager', () => {
   });
 
   describe('initializeAsReceiver', () => {
-    it('4桁のコードを生成して返す', async () => {
+    it('6桁のコードを生成して返す', async () => {
       const code = await manager.initializeAsReceiver();
 
-      expect(code).toMatch(/^\d{4}$/);
+      expect(code).toMatch(/^\d{6}$/);
     });
 
     it('ステータスがwaitingに変わる', async () => {

@@ -121,8 +121,8 @@ export class TransferManager {
     this.role = 'receiver';
     this.setStatus('connecting');
 
-    // Generate a random 4-digit code
-    const code = String(Math.floor(1000 + Math.random() * 9000));
+    // Generate a random 6-digit code
+    const code = String(Math.floor(100000 + Math.random() * 900000));
     this._roomId = code;
 
     await this.signaling.connect(code);

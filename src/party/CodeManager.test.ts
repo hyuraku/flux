@@ -14,18 +14,18 @@ describe('CodeManager', () => {
   });
 
   describe('generateCode', () => {
-    it('4桁の数字コードを生成する', () => {
+    it('6桁の数字コードを生成する', () => {
       const code = codeManager.generateCode();
 
-      expect(code).toMatch(/^\d{4}$/);
+      expect(code).toMatch(/^\d{6}$/);
     });
 
-    it('生成されたコードは0000から9999の範囲内である', () => {
+    it('生成されたコードは000000から999999の範囲内である', () => {
       const code = codeManager.generateCode();
       const numCode = parseInt(code, 10);
 
       expect(numCode).toBeGreaterThanOrEqual(0);
-      expect(numCode).toBeLessThanOrEqual(9999);
+      expect(numCode).toBeLessThanOrEqual(999999);
     });
 
     it('既に使用中のコードは生成しない', () => {
@@ -48,7 +48,7 @@ describe('CodeManager', () => {
 
   describe('registerCode', () => {
     it('コードとreceiverのconnectionIdを紐付けて登録できる', () => {
-      const code = '1234';
+      const code = '123456';
       const connectionId = 'receiver-abc';
 
       codeManager.registerCode(code, connectionId);
@@ -57,7 +57,7 @@ describe('CodeManager', () => {
     });
 
     it('登録時にタイムスタンプが記録される', () => {
-      const code = '1234';
+      const code = '123456';
       const now = Date.now();
       vi.setSystemTime(now);
 
@@ -70,18 +70,18 @@ describe('CodeManager', () => {
 
   describe('validateCode', () => {
     it('有効なコードに対してtrueを返す', () => {
-      const code = '5678';
+      const code = '567890';
       codeManager.registerCode(code, 'receiver-xyz');
 
       expect(codeManager.validateCode(code)).toBe(true);
     });
 
     it('未登録のコードに対してfalseを返す', () => {
-      expect(codeManager.validateCode('9999')).toBe(false);
+      expect(codeManager.validateCode('999999')).toBe(false);
     });
 
     it('有効期限切れのコードに対してfalseを返す', () => {
-      const code = '1234';
+      const code = '123456';
       const now = Date.now();
       vi.setSystemTime(now);
 
@@ -96,7 +96,7 @@ describe('CodeManager', () => {
 
   describe('expireCode', () => {
     it('コードを無効化できる', () => {
-      const code = '1234';
+      const code = '123456';
       codeManager.registerCode(code, 'receiver-abc');
 
       codeManager.expireCode(code);
@@ -107,7 +107,7 @@ describe('CodeManager', () => {
 
   describe('getReceiverConnectionId', () => {
     it('コードに紐付いたreceiverのconnectionIdを取得できる', () => {
-      const code = '1234';
+      const code = '123456';
       const connectionId = 'receiver-abc';
       codeManager.registerCode(code, connectionId);
 
@@ -115,7 +115,7 @@ describe('CodeManager', () => {
     });
 
     it('未登録のコードに対してundefinedを返す', () => {
-      expect(codeManager.getReceiverConnectionId('9999')).toBeUndefined();
+      expect(codeManager.getReceiverConnectionId('999999')).toBeUndefined();
     });
   });
 

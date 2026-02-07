@@ -3,16 +3,16 @@ import { generateCode, validateCode } from './codeGenerator';
 
 describe('codeGenerator', () => {
   describe('generateCode', () => {
-    it('4桁の数字コードを生成する', () => {
+    it('6桁の数字コードを生成する', () => {
       const code = generateCode();
-      expect(code).toMatch(/^\d{4}$/);
+      expect(code).toMatch(/^\d{6}$/);
     });
 
-    it('生成されるコードは0000から9999の範囲である', () => {
+    it('生成されるコードは000000から999999の範囲である', () => {
       const code = generateCode();
       const num = parseInt(code, 10);
       expect(num).toBeGreaterThanOrEqual(0);
-      expect(num).toBeLessThanOrEqual(9999);
+      expect(num).toBeLessThanOrEqual(999999);
     });
 
     it('複数回呼び出すと異なるコードを生成する可能性がある', () => {
@@ -24,37 +24,37 @@ describe('codeGenerator', () => {
       expect(codes.size).toBeGreaterThan(1);
     });
 
-    it('0埋めで4桁を保証する', () => {
+    it('0埋めで6桁を保証する', () => {
       const code = generateCode();
-      expect(code.length).toBe(4);
+      expect(code.length).toBe(6);
     });
   });
 
   describe('validateCode', () => {
-    it('正しい4桁の数字コードはtrueを返す', () => {
-      expect(validateCode('1234')).toBe(true);
-      expect(validateCode('0000')).toBe(true);
-      expect(validateCode('9999')).toBe(true);
-      expect(validateCode('0001')).toBe(true);
+    it('正しい6桁の数字コードはtrueを返す', () => {
+      expect(validateCode('123456')).toBe(true);
+      expect(validateCode('000000')).toBe(true);
+      expect(validateCode('999999')).toBe(true);
+      expect(validateCode('000001')).toBe(true);
     });
 
-    it('4桁未満の数字はfalseを返す', () => {
+    it('6桁未満の数字はfalseを返す', () => {
+      expect(validateCode('12345')).toBe(false);
+      expect(validateCode('1234')).toBe(false);
       expect(validateCode('123')).toBe(false);
-      expect(validateCode('12')).toBe(false);
-      expect(validateCode('1')).toBe(false);
       expect(validateCode('')).toBe(false);
     });
 
-    it('4桁より多い数字はfalseを返す', () => {
-      expect(validateCode('12345')).toBe(false);
-      expect(validateCode('123456')).toBe(false);
+    it('6桁より多い数字はfalseを返す', () => {
+      expect(validateCode('1234567')).toBe(false);
+      expect(validateCode('12345678')).toBe(false);
     });
 
     it('数字以外の文字を含むとfalseを返す', () => {
-      expect(validateCode('12a4')).toBe(false);
-      expect(validateCode('abc4')).toBe(false);
-      expect(validateCode('12-4')).toBe(false);
-      expect(validateCode('12 4')).toBe(false);
+      expect(validateCode('12a456')).toBe(false);
+      expect(validateCode('abcdef')).toBe(false);
+      expect(validateCode('123-56')).toBe(false);
+      expect(validateCode('123 56')).toBe(false);
     });
 
     it('nullまたはundefinedはfalseを返す', () => {

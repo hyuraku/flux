@@ -11,7 +11,7 @@ type AppMode = 'home' | 'send' | 'receive' | 'transferring' | 'completed';
 
 function AppContent() {
   const [mode, setMode] = useState<AppMode>('home');
-  const [digits, setDigits] = useState(['', '', '', '']);
+  const [digits, setDigits] = useState(['', '', '', '', '', '']);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -80,7 +80,7 @@ function AppContent() {
     setDigits(newDigits);
 
     // Auto-focus next
-    if (value && index < 3) {
+    if (value && index < 5) {
       const next = document.getElementById(`digit-${index + 1}`);
       next?.focus();
     }
@@ -97,7 +97,7 @@ function AppContent() {
     cancel();
     reset();
     setMode('home');
-    setDigits(['', '', '', '']);
+    setDigits(['', '', '', '', '', '']);
     setSelectedFiles([]);
   };
 
@@ -130,7 +130,7 @@ function AppContent() {
 
   const handleTransfer = async () => {
     const enteredCode = digits.join('');
-    if (enteredCode.length !== 4 || selectedFiles.length === 0) return;
+    if (enteredCode.length !== 6 || selectedFiles.length === 0) return;
 
     try {
       await initializeAsSender(enteredCode, selectedFiles);
@@ -249,7 +249,7 @@ function AppContent() {
                       <span className="w-8 h-8 rounded-full bg-indigo-500/30 text-indigo-300 flex items-center justify-center text-sm font-bold">2</span>
                       <h3 className="text-white text-sm font-medium">Get code on receiver</h3>
                     </div>
-                    <p className="text-dim text-xs pl-11">Click "Receive" on the receiving device to get a 4-digit code.</p>
+                    <p className="text-dim text-xs pl-11">Click "Receive" on the receiving device to get a 6-digit code.</p>
                   </div>
                   <div className="p-5 rounded-xl bg-white/5 border border-white/10 text-left">
                     <div className="flex items-center gap-3 mb-3">
@@ -319,7 +319,7 @@ function AppContent() {
                 </div>
 
                 {/* 4-Digit Input */}
-                <div className="flex justify-center gap-3" role="group" aria-label="4-digit transfer code input">
+                <div className="flex justify-center gap-3" role="group" aria-label="6-digit transfer code input">
                   {digits.map((digit, i) => (
                     <input
                       key={i}
@@ -398,7 +398,7 @@ function AppContent() {
               )}
 
               {/* Transfer Button */}
-              {selectedFiles.length > 0 && enteredCode.length === 4 && (
+              {selectedFiles.length > 0 && enteredCode.length === 6 && (
                 <button
                   onClick={handleTransfer}
                   disabled={transferStatus === 'connecting'}

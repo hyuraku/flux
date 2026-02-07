@@ -29,7 +29,7 @@ export class CodeManager {
   private lockouts: Map<string, LockoutInfo> = new Map();
 
   /**
-   * 4桁のユニークなコードを生成
+   * 6桁のユニークなコードを生成
    */
   generateCode(): string {
     let code: string;
@@ -187,11 +187,11 @@ export class CodeManager {
   }
 
   /**
-   * ランダムな4桁コードを生成
+   * ランダムな6桁コードを生成
    */
   private generateRandomCode(): string {
-    const num = Math.floor(Math.random() * 10000);
-    return num.toString().padStart(4, '0');
+    const num = Math.floor(Math.random() * CODE_MAX);
+    return num.toString().padStart(CODE_LENGTH, '0');
   }
 
   /**
