@@ -237,6 +237,61 @@ body {
   z-index: 1;
 }
 
+.btn-cosmic-alt {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 1rem 2rem;
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 1rem;
+  color: white;
+  background: linear-gradient(135deg, #0e7490 0%, #0891b2 50%, #0d9488 100%);
+  border: none;
+  border-radius: 16px;
+  cursor: pointer;
+  overflow: hidden;
+  transition: all 0.4s var(--ease-out-expo);
+}
+
+.btn-cosmic-alt svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+}
+
+.btn-cosmic-alt::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, #0891b2 0%, #14b8a6 50%, #0d9488 100%);
+  opacity: 0;
+  transition: opacity 0.4s var(--ease-out-expo);
+}
+
+.btn-cosmic-alt:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 10px 40px -10px rgba(6, 182, 212, 0.5),
+    0 0 20px rgba(6, 182, 212, 0.3);
+}
+
+.btn-cosmic-alt:hover::before {
+  opacity: 1;
+}
+
+.btn-cosmic-alt:active {
+  transform: translateY(0);
+}
+
+.btn-cosmic-alt span,
+.btn-cosmic-alt svg {
+  position: relative;
+  z-index: 1;
+}
+
 .btn-ghost {
   display: inline-flex;
   align-items: center;

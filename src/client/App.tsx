@@ -180,7 +180,7 @@ function AppContent() {
 
                 <button
                   onClick={handleSendMode}
-                  className="btn-ghost w-full py-4"
+                  className="btn-cosmic-alt w-full py-5 text-lg"
                   aria-label="Send files"
                 >
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
