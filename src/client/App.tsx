@@ -29,7 +29,6 @@ function AppContent() {
 
   const { isIOSSafari, wrapFileInputClick } = useIOSReconnect({
     onReconnect: async () => {
-      // Handle reconnection if needed
       console.log('iOS reconnect triggered');
     },
   });
@@ -139,17 +138,14 @@ function AppContent() {
     }
   };
 
-  // Calculate total file size
   const totalSize = selectedFiles.reduce((sum, f) => sum + f.size, 0);
   const enteredCode = digits.join('');
 
   return (
     <>
-      {/* Animated cosmic background */}
       <div className="cosmic-bg" />
 
       <div className="relative min-h-screen flex flex-col">
-        {/* Header */}
         <header className="pt-12 pb-8 text-center animate-in">
           <h1 className="text-display text-4xl md:text-5xl text-white mb-2">
             flux
@@ -159,13 +155,11 @@ function AppContent() {
           </p>
         </header>
 
-        {/* Main Content */}
         <main className={`flex-1 px-6 pb-12 ${mode === 'home' ? 'overflow-y-auto' : 'flex items-center justify-center'}`}>
 
           {/* Home Screen */}
           {mode === 'home' && (
             <div className="w-full max-w-2xl mx-auto py-8 space-y-16 animate-scale-in">
-              {/* Action Buttons */}
               <div className="max-w-sm mx-auto space-y-6">
                 <button
                   onClick={handleReceiveMode}
@@ -196,7 +190,6 @@ function AppContent() {
                 </button>
               </div>
 
-              {/* What's flux? Section */}
               <section className="text-center space-y-6">
                 <h2 className="text-display text-2xl text-white">What's flux?</h2>
                 <p className="text-muted text-sm leading-relaxed max-w-md mx-auto">
@@ -233,7 +226,6 @@ function AppContent() {
                 </div>
               </section>
 
-              {/* How to use Section */}
               <section className="text-center space-y-6">
                 <h2 className="text-display text-2xl text-white">How to use</h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -273,10 +265,8 @@ function AppContent() {
           {/* Receive Screen - Giant Code Display */}
           {mode === 'receive' && (
             <div className="text-center space-y-12 animate-in">
-              {/* Connection Status */}
               <ConnectionStatus status={connectionStatus} error={error} />
 
-              {/* Giant glowing code */}
               <div
                 className="code-giant select-all cursor-pointer"
                 onClick={handleCopyCode}
@@ -288,7 +278,6 @@ function AppContent() {
                 {code || '----'}
               </div>
 
-              {/* Status */}
               <div className="flex items-center justify-center gap-3" role="status" aria-live="polite">
                 <div className="status-pulse" aria-hidden="true" />
                 <span className="text-muted text-sm">
@@ -296,12 +285,10 @@ function AppContent() {
                 </span>
               </div>
 
-              {/* Copy hint */}
               <p className="text-dim text-xs">
                 click code to copy
               </p>
 
-              {/* Cancel */}
               <button onClick={handleBack} className="btn-ghost" aria-label="Cancel receiving">
                 Cancel
               </button>
@@ -311,14 +298,12 @@ function AppContent() {
           {/* Send Screen - Code Input + File Select */}
           {mode === 'send' && (
             <div className="w-full max-w-md space-y-10 animate-in">
-              {/* Code Input Section */}
               <div className="text-center space-y-6">
                 <div>
                   <h2 className="text-display text-2xl text-white mb-2">Enter Code</h2>
                   <p className="text-muted text-sm">from the receiving device</p>
                 </div>
 
-                {/* 4-Digit Input */}
                 <div className="flex justify-center gap-3" role="group" aria-label="6-digit transfer code input">
                   {digits.map((digit, i) => (
                     <input
@@ -338,7 +323,6 @@ function AppContent() {
                 </div>
               </div>
 
-              {/* File Drop Zone */}
               <div
                 className={`drop-zone ${isDragging ? 'active' : ''}`}
                 onDragEnter={() => setIsDragging(true)}
@@ -390,14 +374,12 @@ function AppContent() {
                 )}
               </div>
 
-              {/* Error Message */}
               {error && (
                 <div className="text-center text-red-400 text-sm">
                   {error}
                 </div>
               )}
 
-              {/* Transfer Button */}
               {selectedFiles.length > 0 && enteredCode.length === 6 && (
                 <button
                   onClick={handleTransfer}
@@ -423,7 +405,6 @@ function AppContent() {
                 </button>
               )}
 
-              {/* Back Button */}
               <div className="text-center">
                 <button onClick={handleBack} className="btn-ghost" aria-label="Back to home">
                   Back
@@ -435,7 +416,6 @@ function AppContent() {
           {/* Transferring Screen */}
           {mode === 'transferring' && (
             <div className="w-full max-w-md text-center space-y-10 animate-in" role="status" aria-live="polite">
-              {/* Status */}
               <div className="space-y-4">
                 <h2 className="text-display text-2xl text-white">
                   {transferStatus === 'connecting' ? 'Connecting...' : 'Transferring...'}
@@ -445,7 +425,6 @@ function AppContent() {
                 </p>
               </div>
 
-              {/* Progress */}
               <TransferProgress
                 progress={progress.progress}
                 speed={progress.speed}
@@ -454,7 +433,6 @@ function AppContent() {
                 totalBytes={progress.totalBytes || totalSize}
               />
 
-              {/* File list */}
               <div className="space-y-2">
                 {selectedFiles.map((file, i) => (
                   <div key={i} className="file-item opacity-60">
@@ -470,7 +448,6 @@ function AppContent() {
                 ))}
               </div>
 
-              {/* Cancel */}
               <button onClick={handleBack} className="btn-ghost" aria-label="Cancel transfer">
                 Cancel
               </button>
@@ -480,14 +457,12 @@ function AppContent() {
           {/* Completed Screen */}
           {mode === 'completed' && (
             <div className="text-center space-y-10 animate-scale-in" role="status" aria-live="polite">
-              {/* Success Icon */}
               <div className="w-24 h-24 mx-auto rounded-full bg-gradient-to-br from-green-500/20 to-emerald-500/20 flex items-center justify-center">
                 <svg className="w-12 h-12 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
               </div>
 
-              {/* Message */}
               <div className="space-y-3">
                 <h2 className="text-display text-3xl text-white">Transfer Complete!</h2>
                 <p className="text-muted">
@@ -498,7 +473,6 @@ function AppContent() {
                 </p>
               </div>
 
-              {/* Done button */}
               <button onClick={handleBack} className="btn-cosmic px-12" aria-label="Done, back to home">
                 <span>Done</span>
               </button>
@@ -506,7 +480,6 @@ function AppContent() {
           )}
         </main>
 
-        {/* Footer */}
         <footer className="pb-8 text-center">
           <p className="text-dim text-xs tracking-wide">
             end-to-end encrypted
