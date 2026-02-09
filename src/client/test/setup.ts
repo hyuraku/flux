@@ -18,7 +18,8 @@ if (typeof Blob.prototype.arrayBuffer !== 'function') {
 }
 
 if (typeof Blob.prototype.stream !== 'function') {
-  Blob.prototype.stream = function (): ReadableStream<Uint8Array> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  Blob.prototype.stream = function (): any {
     const blob = this;
     return new ReadableStream({
       async start(controller) {
@@ -30,7 +31,14 @@ if (typeof Blob.prototype.stream !== 'function') {
   };
 }
 
-// 各テスト後にクリーンアップ
+// jsdom には CompressionStream / DecompressionStream がないため Node.js から注入
+if (typeof globalThis.CompressionStream === 'undefined') {
+  // @ts-expect-error -- stream/web は Node.js 内部モジュールで型定義がない
+  const streamWeb = await import('stream/web');
+  globalThis.CompressionStream = streamWeb.CompressionStream;
+  globalThis.DecompressionStream = streamWeb.DecompressionStream;
+}
+
 afterEach(() => {
   cleanup();
 });

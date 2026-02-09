@@ -1,14 +1,5 @@
-import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { CompressionService } from './CompressionService';
-
-// jsdom環境ではCompressionStreamがない可能性があるため、Node.jsグローバルから注入
-beforeAll(async () => {
-  if (typeof globalThis.CompressionStream === 'undefined') {
-    const streamWeb = await import('stream/web');
-    vi.stubGlobal('CompressionStream', (streamWeb as any).CompressionStream);
-    vi.stubGlobal('DecompressionStream', (streamWeb as any).DecompressionStream);
-  }
-});
 
 describe('CompressionService', () => {
   let service: CompressionService;

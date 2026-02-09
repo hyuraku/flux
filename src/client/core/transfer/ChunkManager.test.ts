@@ -1,13 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ChunkManager, type Chunk } from './ChunkManager';
-
-async function blobToArray(blob: Blob): Promise<number[]> {
-  return Array.from(new Uint8Array(await blob.arrayBuffer()));
-}
-
-function toArray(data: Uint8Array): number[] {
-  return Array.from(data);
-}
+import { blobToArray, toArray } from '../../test/helpers';
 
 describe('ChunkManager', () => {
   let manager: ChunkManager;

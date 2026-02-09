@@ -1,53 +1,30 @@
-import { describe, it, expect, beforeAll, vi } from 'vitest';
-import { ChunkManager } from './ChunkManager';
+import { describe, it, expect } from 'vitest';
+import { ChunkManager, type ChunkMetadata } from './ChunkManager';
 import { CompressionService } from './CompressionService';
+import { blobToArray, toArray } from '../../test/helpers';
 
-// jsdom環境ではCompressionStreamがない可能性があるため注入
-beforeAll(async () => {
-  if (typeof globalThis.CompressionStream === 'undefined') {
-    const streamWeb = await import('stream/web');
-    vi.stubGlobal('CompressionStream', (streamWeb as any).CompressionStream);
-    vi.stubGlobal('DecompressionStream', (streamWeb as any).DecompressionStream);
-  }
-});
-
-async function blobToArray(blob: Blob): Promise<number[]> {
-  return Array.from(new Uint8Array(await blob.arrayBuffer()));
-}
-
-function toArray(data: Uint8Array): number[] {
-  return Array.from(data);
-}
-
-/**
- * 送信パイプライン: File → split → (compress) → serialize
- */
+/** 送信パイプライン: File -> split -> (compress) -> serialize */
 async function senderPipeline(
   file: File,
   chunkSize: number,
-  shouldCompress: boolean,
-): Promise<{ serializedChunks: Uint8Array[]; compressed: boolean }> {
+  compress: boolean,
+): Promise<Uint8Array[]> {
   const cm = new ChunkManager(chunkSize);
   const compression = new CompressionService();
 
-  const serializedChunks: Uint8Array[] = [];
+  const chunks: Uint8Array[] = [];
   for await (const chunk of cm.split(file)) {
-    let data = chunk.data;
-    if (shouldCompress) {
-      data = await compression.compress(data);
-    }
-    serializedChunks.push(ChunkManager.serializeChunk({ ...chunk, data }));
+    const data = compress ? await compression.compress(chunk.data) : chunk.data;
+    chunks.push(ChunkManager.serializeChunk({ ...chunk, data }));
   }
 
-  return { serializedChunks, compressed: shouldCompress };
+  return chunks;
 }
 
-/**
- * 受信パイプライン: deserialize → (decompress) → addChunk → toFile
- */
+/** 受信パイプライン: deserialize -> (decompress) -> addChunk -> toFile */
 async function receiverPipeline(
   serializedChunks: Uint8Array[],
-  metadata: ReturnType<ChunkManager['createMetadata']>,
+  metadata: ChunkMetadata,
   isCompressed: boolean,
 ): Promise<File> {
   const cm = new ChunkManager(metadata.chunkSize);
@@ -76,7 +53,7 @@ describe('Transfer Pipeline 統合テスト', () => {
       const cm = new ChunkManager(chunkSize);
       const metadata = cm.createMetadata(file);
 
-      const { serializedChunks } = await senderPipeline(file, chunkSize, false);
+      const serializedChunks = await senderPipeline(file, chunkSize, false);
       const received = await receiverPipeline(serializedChunks, metadata, false);
 
       expect(received.name).toBe('small.txt');
@@ -91,7 +68,7 @@ describe('Transfer Pipeline 統合テスト', () => {
       const cm = new ChunkManager(chunkSize);
       const metadata = cm.createMetadata(file);
 
-      const { serializedChunks } = await senderPipeline(file, chunkSize, false);
+      const serializedChunks = await senderPipeline(file, chunkSize, false);
       expect(serializedChunks.length).toBeGreaterThan(1);
 
       const received = await receiverPipeline(serializedChunks, metadata, false);
@@ -108,7 +85,7 @@ describe('Transfer Pipeline 統合テスト', () => {
       const cm = new ChunkManager(chunkSize);
       const metadata = cm.createMetadata(file);
 
-      const { serializedChunks } = await senderPipeline(file, chunkSize, true);
+      const serializedChunks = await senderPipeline(file, chunkSize, true);
       const received = await receiverPipeline(serializedChunks, metadata, true);
 
       const receivedBytes = await blobToArray(received);
@@ -122,7 +99,7 @@ describe('Transfer Pipeline 統合テスト', () => {
       const cm = new ChunkManager(chunkSize);
       const metadata = cm.createMetadata(file);
 
-      const { serializedChunks } = await senderPipeline(file, chunkSize, true);
+      const serializedChunks = await senderPipeline(file, chunkSize, true);
       // 意図的に isCompressed=false で受信（解凍しない = バグの再現）
       const broken = await receiverPipeline(serializedChunks, metadata, false);
 
@@ -137,7 +114,7 @@ describe('Transfer Pipeline 統合テスト', () => {
       const cm = new ChunkManager(chunkSize);
       const metadata = cm.createMetadata(file);
 
-      const { serializedChunks } = await senderPipeline(file, chunkSize, false);
+      const serializedChunks = await senderPipeline(file, chunkSize, false);
       const received = await receiverPipeline(serializedChunks, metadata, false);
 
       const receivedBytes = await blobToArray(received);
@@ -152,7 +129,7 @@ describe('Transfer Pipeline 統合テスト', () => {
       const cm = new ChunkManager(chunkSize);
       const metadata = cm.createMetadata(file);
 
-      const { serializedChunks } = await senderPipeline(file, chunkSize, true);
+      const serializedChunks = await senderPipeline(file, chunkSize, true);
       const received = await receiverPipeline(serializedChunks, metadata, true);
 
       const receivedBytes = await blobToArray(received);
@@ -178,7 +155,7 @@ describe('Transfer Pipeline 統合テスト', () => {
       const cm = new ChunkManager(chunkSize);
       const metadata = cm.createMetadata(file);
 
-      const { serializedChunks } = await senderPipeline(file, chunkSize, false);
+      const serializedChunks = await senderPipeline(file, chunkSize, false);
       const received = await receiverPipeline(serializedChunks, metadata, false);
 
       const receivedBytes = await blobToArray(received);
@@ -191,7 +168,7 @@ describe('Transfer Pipeline 統合テスト', () => {
       const cm = new ChunkManager(chunkSize);
       const metadata = cm.createMetadata(file);
 
-      const { serializedChunks } = await senderPipeline(file, chunkSize, false);
+      const serializedChunks = await senderPipeline(file, chunkSize, false);
       expect(serializedChunks).toHaveLength(1);
 
       const received = await receiverPipeline(serializedChunks, metadata, false);
@@ -208,7 +185,7 @@ describe('Transfer Pipeline 統合テスト', () => {
 
       expect(compression.shouldCompress(file.size)).toBe(true);
 
-      const { serializedChunks } = await senderPipeline(file, chunkSize, true);
+      const serializedChunks = await senderPipeline(file, chunkSize, true);
       const received = await receiverPipeline(serializedChunks, metadata, true);
 
       const receivedBytes = await blobToArray(received);
