@@ -157,6 +157,7 @@ function AppContent() {
 
   const totalSize = selectedFiles.reduce((sum, f) => sum + f.size, 0);
   const enteredCode = digits.join('');
+  const isTransferReady = selectedFiles.length > 0 && enteredCode.length === 6 && !fileValidation?.error;
 
   return (
     <>
@@ -447,30 +448,34 @@ function AppContent() {
                 </div>
               )}
 
-              {selectedFiles.length > 0 && enteredCode.length === 6 && !fileValidation?.error && (
-                <button
-                  onClick={handleTransfer}
-                  disabled={transferStatus === 'connecting'}
-                  className="btn-cosmic w-full py-5 text-lg animate-scale-in disabled:opacity-50"
-                  aria-label="Transfer files"
-                >
-                  {transferStatus === 'connecting' ? (
-                    <>
-                      <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      <span>Connecting...</span>
-                    </>
-                  ) : (
-                    <>
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
-                      </svg>
-                      <span>Transfer</span>
-                    </>
-                  )}
-                </button>
-              )}
+              <button
+                onClick={handleTransfer}
+                disabled={!isTransferReady || transferStatus === 'connecting'}
+                className={`btn-cosmic w-full py-5 text-lg disabled:opacity-30 disabled:cursor-not-allowed disabled:!transform-none ${isTransferReady ? 'animate-scale-in' : ''}`}
+                aria-label="Transfer files"
+              >
+                {transferStatus === 'connecting' ? (
+                  <>
+                    <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Connecting...</span>
+                  </>
+                ) : enteredCode.length < 6 ? (
+                  <span>Enter code to continue</span>
+                ) : selectedFiles.length === 0 ? (
+                  <span>Select files to continue</span>
+                ) : fileValidation?.error ? (
+                  <span>Fix file errors to continue</span>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
+                    </svg>
+                    <span>Transfer</span>
+                  </>
+                )}
+              </button>
 
               <div className="text-center">
                 <button onClick={handleBack} className="btn-ghost" aria-label="Back to home">
