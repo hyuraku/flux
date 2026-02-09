@@ -80,6 +80,7 @@ export class TransferManager {
   private eventHandlers: Map<TransferEventType, Set<TransferEventHandler>> = new Map();
   private cleanupFunctions: (() => void)[] = [];
   private webrtcCreated = false;
+  private isCurrentFileCompressed = false;
 
   constructor(options: TransferOptions = {}) {
     this.options = {
@@ -342,12 +343,16 @@ export class TransferManager {
     }
 
     // Handle as chunk
-    this.handleChunkData(data);
+    this.handleChunkData(data).catch((err) => {
+      this.setStatus('error');
+      this.emit({ type: 'error', data: { message: err?.message || 'Chunk processing failed' } });
+    });
   }
 
   private handleFileMetadata(message: FileMetadataMessage): void {
     this.chunkManager.reset();
     this.chunkManager.setMetadata(message.metadata);
+    this.isCurrentFileCompressed = message.compressed;
     this.totalBytes = message.metadata.totalSize;
     this.bytesTransferred = 0;
     this._transferStartTime = Date.now();
@@ -356,6 +361,10 @@ export class TransferManager {
 
   private async handleChunkData(data: Uint8Array): Promise<void> {
     const chunk = ChunkManager.deserializeChunk(data);
+
+    if (this.isCurrentFileCompressed) {
+      chunk.data = await this.compression.decompress(chunk.data);
+    }
 
     this.chunkManager.addChunk(chunk);
     this.bytesTransferred += chunk.size;
