@@ -353,7 +353,7 @@ function AppContent() {
                   <p className="text-muted text-sm">from the receiving device</p>
                 </div>
 
-                <div className="flex justify-center gap-3" role="group" aria-label="6-digit transfer code input">
+                <div className="flex justify-center gap-2 sm:gap-3" role="group" aria-label="6-digit transfer code input">
                   {digits.map((digit, i) => (
                     <input
                       key={i}
