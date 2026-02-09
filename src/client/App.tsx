@@ -4,7 +4,7 @@ import { useIOSReconnect } from './hooks/useIOSReconnect';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ConnectionStatus } from './components/ConnectionStatus';
 import { TransferProgress } from './components/TransferProgress';
-import { formatFileSize } from './utils/validators';
+import { formatFileSize, validateFiles } from './utils/validators';
 import { saveAs } from 'file-saver';
 
 type AppMode = 'home' | 'send' | 'receive' | 'transferring' | 'completed';
@@ -14,6 +14,7 @@ function AppContent() {
   const [digits, setDigits] = useState(['', '', '', '', '', '']);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [fileValidation, setFileValidation] = useState<{ error?: string; warning?: string } | null>(null);
 
   const {
     status: transferStatus,
@@ -98,6 +99,7 @@ function AppContent() {
     setMode('home');
     setDigits(['', '', '', '', '', '']);
     setSelectedFiles([]);
+    setFileValidation(null);
   };
 
   const handleCopyCode = async () => {
@@ -110,11 +112,26 @@ function AppContent() {
     e.preventDefault();
     setIsDragging(false);
     const files = Array.from(e.dataTransfer.files);
+    const result = validateFiles(files);
+    if (!result.valid) {
+      setFileValidation({ error: result.error });
+      setSelectedFiles([]);
+      return;
+    }
+    setFileValidation(result.warning ? { warning: result.warning } : null);
     setSelectedFiles(files);
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    const result = validateFiles(files);
+    if (!result.valid) {
+      setFileValidation({ error: result.error });
+      setSelectedFiles([]);
+      return;
+    }
+    setFileValidation(result.warning ? { warning: result.warning } : null);
     setSelectedFiles(files);
   };
 
@@ -385,6 +402,7 @@ function AppContent() {
                     <div>
                       <p className="text-white text-sm font-medium">Drop files here</p>
                       <p className="text-dim text-xs mt-1">or click to browse</p>
+                      <p className="text-dim text-xs mt-2">Max 2GB per transfer</p>
                     </div>
                   </div>
                 ) : (
@@ -406,13 +424,30 @@ function AppContent() {
                 )}
               </div>
 
+              {fileValidation?.error && (
+                <div className="text-center text-red-400 text-sm" role="alert">
+                  {fileValidation.error}
+                </div>
+              )}
+
+              {fileValidation?.warning && (
+                <div className="text-center text-amber-400 text-sm" role="alert">
+                  <span className="inline-flex items-center gap-1.5">
+                    <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                    </svg>
+                    {fileValidation.warning}
+                  </span>
+                </div>
+              )}
+
               {error && (
                 <div className="text-center text-red-400 text-sm">
                   {error}
                 </div>
               )}
 
-              {selectedFiles.length > 0 && enteredCode.length === 6 && (
+              {selectedFiles.length > 0 && enteredCode.length === 6 && !fileValidation?.error && (
                 <button
                   onClick={handleTransfer}
                   disabled={transferStatus === 'connecting'}
