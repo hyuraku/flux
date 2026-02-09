@@ -45,7 +45,6 @@ export interface TransferEvent {
 
 export type TransferEventHandler = (event: TransferEvent) => void;
 
-// Message types for P2P communication
 interface FileMetadataMessage {
   type: 'file_metadata';
   metadata: ChunkMetadata;
@@ -80,6 +79,7 @@ export class TransferManager {
   private eventHandlers: Map<TransferEventType, Set<TransferEventHandler>> = new Map();
   private cleanupFunctions: (() => void)[] = [];
   private webrtcCreated = false;
+  private isCurrentFileCompressed = false;
 
   constructor(options: TransferOptions = {}) {
     this.options = {
@@ -116,26 +116,22 @@ export class TransferManager {
     };
   }
 
-  // Initialize as receiver - generates a code and waits
   async initializeAsReceiver(): Promise<string> {
     this.role = 'receiver';
     this.setStatus('connecting');
 
-    // Generate a random 6-digit code
     const code = String(Math.floor(100000 + Math.random() * 900000));
     this._roomId = code;
 
     await this.signaling.connect(code);
     this.setupSignalingHandlers();
 
-    // Register the code with the server so sender can join
     this.signaling.generateCode();
 
     this.setStatus('waiting');
     return code;
   }
 
-  // Initialize as sender - connects with the given code
   async initializeAsSender(code: string, files: File[]): Promise<void> {
     this.role = 'sender';
     this.files = files;
@@ -147,37 +143,30 @@ export class TransferManager {
     await this.signaling.connect(code);
     this.setupSignalingHandlers();
 
-    // Join the room as sender
     this.signaling.joinRoom(code, 'sender');
   }
 
   private setupSignalingHandlers(): void {
     const cleanup1 = this.signaling.on('peer_joined', (event) => {
-      // Only handle peer_joined if the peer's role is different from ours
       const peerRole = event.data.role;
       if (peerRole === this.role) {
-        // Ignore our own peer_joined event
         return;
       }
 
       this.targetPeerId = event.data.peerId;
 
       if (this.role === 'receiver') {
-        // Receiver creates the WebRTC offer
         this.webrtc.create({ initiator: true });
         this.setupWebRTCHandlers();
         this.webrtcCreated = true;
       }
-      // Sender will create WebRTC when it receives the offer
     });
 
     const cleanup2 = this.signaling.on('webrtc_offer', (event) => {
       if (this.role === 'sender') {
-        // Set targetPeerId from the offer's fromPeerId
         if (event.data.fromPeerId) {
           this.targetPeerId = event.data.fromPeerId;
         }
-        // Create WebRTC connection if not already created
         if (!this.webrtcCreated) {
           this.webrtc.create({ initiator: false });
           this.setupWebRTCHandlers();
@@ -194,7 +183,6 @@ export class TransferManager {
     });
 
     const cleanup4 = this.signaling.on('ice_candidate', (event) => {
-      // Set targetPeerId if not already set
       if (!this.targetPeerId && event.data.fromPeerId) {
         this.targetPeerId = event.data.fromPeerId;
       }
@@ -261,7 +249,6 @@ export class TransferManager {
       await this.sendFile(file);
     }
 
-    // Send transfer complete message
     this.webrtc.sendJSON({ type: 'transfer_complete' } as TransferCompleteMessage);
     this.setStatus('completed');
     this.emit({ type: 'transfer_complete' });
@@ -273,7 +260,6 @@ export class TransferManager {
       CompressionService.isSupported() &&
       this.compression.shouldCompress(file.size);
 
-    // Send metadata
     const metadataMsg: FileMetadataMessage = {
       type: 'file_metadata',
       metadata,
@@ -282,72 +268,65 @@ export class TransferManager {
     };
     this.webrtc.sendJSON(metadataMsg);
 
-    // Wait a bit for receiver to process metadata
     await new Promise(resolve => setTimeout(resolve, 100));
 
-    // Send chunks
     for await (const chunk of this.chunkManager.split(file)) {
       let data = chunk.data;
 
-      // Compress if needed
       if (shouldCompress) {
         data = await this.compression.compress(data);
       }
 
-      // Serialize and send
       const serialized = ChunkManager.serializeChunk({ ...chunk, data });
       this.webrtc.send(serialized);
 
       this.bytesTransferred += chunk.size;
       this.updateProgress();
 
-      // Small delay to prevent overwhelming the connection
       await new Promise(resolve => setTimeout(resolve, 1));
     }
   }
 
   private handleReceivedData(data: Uint8Array | string): void {
-    // Handle string data (JSON messages sent via sendJSON)
     if (typeof data === 'string') {
-      try {
-        const message = JSON.parse(data);
-        if (message.type === 'file_metadata') {
-          this.handleFileMetadata(message as FileMetadataMessage);
-          return;
-        } else if (message.type === 'transfer_complete') {
-          this.handleTransferComplete();
-          return;
-        }
-      } catch {
-        console.warn('Received unparseable string data:', data);
-      }
-      return; // Don't try to handle string as chunk
+      this.tryDispatchJsonMessage(data);
+      return;
     }
 
-    // Handle binary data (Uint8Array)
-    // Try to parse as JSON first (in case binary data is JSON)
-    try {
-      const text = new TextDecoder().decode(data);
-      const message = JSON.parse(text);
+    // Binary data may be a JSON control message or a chunk
+    const text = new TextDecoder().decode(data);
+    if (this.tryDispatchJsonMessage(text)) {
+      return;
+    }
 
+    this.handleChunkData(data).catch((err) => {
+      this.setStatus('error');
+      this.emit({ type: 'error', data: { message: err?.message || 'Chunk processing failed' } });
+    });
+  }
+
+  /** Attempt to parse JSON and dispatch a control message. Returns true if handled. */
+  private tryDispatchJsonMessage(text: string): boolean {
+    try {
+      const message = JSON.parse(text);
       if (message.type === 'file_metadata') {
         this.handleFileMetadata(message as FileMetadataMessage);
-        return;
-      } else if (message.type === 'transfer_complete') {
+        return true;
+      }
+      if (message.type === 'transfer_complete') {
         this.handleTransferComplete();
-        return;
+        return true;
       }
     } catch {
-      // Not JSON, treat as chunk data
+      // Not valid JSON -- caller decides what to do next
     }
-
-    // Handle as chunk
-    this.handleChunkData(data);
+    return false;
   }
 
   private handleFileMetadata(message: FileMetadataMessage): void {
     this.chunkManager.reset();
     this.chunkManager.setMetadata(message.metadata);
+    this.isCurrentFileCompressed = message.compressed;
     this.totalBytes = message.metadata.totalSize;
     this.bytesTransferred = 0;
     this._transferStartTime = Date.now();
@@ -356,6 +335,10 @@ export class TransferManager {
 
   private async handleChunkData(data: Uint8Array): Promise<void> {
     const chunk = ChunkManager.deserializeChunk(data);
+
+    if (this.isCurrentFileCompressed) {
+      chunk.data = await this.compression.decompress(chunk.data);
+    }
 
     this.chunkManager.addChunk(chunk);
     this.bytesTransferred += chunk.size;
@@ -416,7 +399,6 @@ export class TransferManager {
     this.webrtcCreated = false;
   }
 
-  // Get received file (for receiver)
   getReceivedFile(): File | null {
     if (this.chunkManager.isComplete()) {
       return this.chunkManager.toFile();
