@@ -435,6 +435,31 @@ body {
 }
 
 /* ========================================
+   Completion Animations
+   ======================================== */
+
+@keyframes checkDraw {
+  from { stroke-dashoffset: 24; }
+  to { stroke-dashoffset: 0; }
+}
+
+.check-draw {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+  animation: checkDraw 0.5s ease-out 0.3s forwards;
+}
+
+@keyframes circleGlow {
+  0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
+  50% { box-shadow: 0 0 40px 10px rgba(34, 197, 94, 0.2); }
+  100% { box-shadow: 0 0 20px 5px rgba(34, 197, 94, 0.1); }
+}
+
+.circle-glow {
+  animation: circleGlow 1.5s ease-out 0.2s forwards;
+}
+
+/* ========================================
    Utilities
    ======================================== */
 
