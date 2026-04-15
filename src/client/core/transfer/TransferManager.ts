@@ -2,10 +2,12 @@ import { SignalingClient } from '../connection/SignalingClient';
 import { WebRTCConnection } from '../connection/WebRTCConnection';
 import { ChunkManager, type ChunkMetadata } from './ChunkManager';
 import { CompressionService } from './CompressionService';
+import { EncryptionService, type ExportedPublicKey } from './EncryptionService';
 
 export type TransferStatus =
   | 'idle'
   | 'connecting'
+  | 'key_exchanging'
   | 'waiting'
   | 'transferring'
   | 'completed'
@@ -50,7 +52,11 @@ interface FileMetadataMessage {
   metadata: ChunkMetadata;
   compressed: boolean;
   encrypted: boolean;
-  publicKey?: JsonWebKey;
+}
+
+interface KeyExchangeMessage {
+  type: 'key_exchange';
+  publicKey: ExportedPublicKey;
 }
 
 interface TransferCompleteMessage {
@@ -62,6 +68,7 @@ export class TransferManager {
   private webrtc: WebRTCConnection;
   private chunkManager: ChunkManager;
   private compression: CompressionService;
+  private encryption: EncryptionService;
 
   private status: TransferStatus = 'idle';
   private role: TransferRole | null = null;
@@ -80,6 +87,8 @@ export class TransferManager {
   private cleanupFunctions: (() => void)[] = [];
   private webrtcCreated = false;
   private isCurrentFileCompressed = false;
+  private isCurrentFileEncrypted = false;
+  private keyExchangeResolve: ((value: void) => void) | null = null;
 
   constructor(options: TransferOptions = {}) {
     this.options = {
@@ -92,6 +101,7 @@ export class TransferManager {
     this.webrtc = new WebRTCConnection();
     this.chunkManager = new ChunkManager(this.options.chunkSize);
     this.compression = new CompressionService();
+    this.encryption = new EncryptionService();
   }
 
   get currentStatus(): TransferStatus {
@@ -214,11 +224,18 @@ export class TransferManager {
     });
 
     const cleanup2 = this.webrtc.on('connected', () => {
-      if (this.role === 'sender') {
-        this.startSending();
-      } else {
-        this.setStatus('transferring');
-      }
+      this.performKeyExchange()
+        .then(() => {
+          if (this.role === 'sender') {
+            this.startSending();
+          } else {
+            this.setStatus('transferring');
+          }
+        })
+        .catch((err) => {
+          this.setStatus('error');
+          this.emit({ type: 'error', data: { message: err?.message || 'Key exchange failed' } });
+        });
     });
 
     const cleanup3 = this.webrtc.on('data', (event) => {
@@ -240,6 +257,38 @@ export class TransferManager {
     this.cleanupFunctions.push(cleanup1, cleanup2, cleanup3, cleanup4, cleanup5);
   }
 
+  private async performKeyExchange(): Promise<void> {
+    if (!this.options.enableEncryption) return;
+
+    this.setStatus('key_exchanging');
+
+    const publicKey = await this.encryption.generateKeyPair();
+    this.webrtc.sendJSON({
+      type: 'key_exchange',
+      publicKey,
+    } as KeyExchangeMessage);
+
+    const keyExchangePromise = new Promise<void>((resolve, reject) => {
+      this.keyExchangeResolve = resolve;
+      const timeout = setTimeout(() => {
+        this.keyExchangeResolve = null;
+        reject(new Error('Key exchange timed out'));
+      }, 10_000);
+      this.cleanupFunctions.push(() => clearTimeout(timeout));
+    });
+
+    await keyExchangePromise;
+  }
+
+  private async handleKeyExchange(message: KeyExchangeMessage): Promise<void> {
+    await this.encryption.deriveSharedKey(message.publicKey);
+
+    if (this.keyExchangeResolve) {
+      this.keyExchangeResolve();
+      this.keyExchangeResolve = null;
+    }
+  }
+
   private async startSending(): Promise<void> {
     this.setStatus('transferring');
     this._transferStartTime = Date.now();
@@ -259,12 +308,13 @@ export class TransferManager {
     const shouldCompress = this.options.enableCompression &&
       CompressionService.isSupported() &&
       this.compression.shouldCompress(file.size);
+    const shouldEncrypt = this.options.enableEncryption && this.encryption.isReady();
 
     const metadataMsg: FileMetadataMessage = {
       type: 'file_metadata',
       metadata,
       compressed: shouldCompress,
-      encrypted: this.options.enableEncryption,
+      encrypted: shouldEncrypt,
     };
     this.webrtc.sendJSON(metadataMsg);
 
@@ -275,6 +325,11 @@ export class TransferManager {
 
       if (shouldCompress) {
         data = await this.compression.compress(data);
+      }
+
+      if (shouldEncrypt) {
+        const encrypted = await this.encryption.encrypt(data.buffer as ArrayBuffer);
+        data = new Uint8Array(this.encryption.serializeEncryptedData(encrypted));
       }
 
       const serialized = ChunkManager.serializeChunk({ ...chunk, data });
@@ -309,6 +364,13 @@ export class TransferManager {
   private tryDispatchJsonMessage(text: string): boolean {
     try {
       const message = JSON.parse(text);
+      if (message.type === 'key_exchange') {
+        this.handleKeyExchange(message as KeyExchangeMessage).catch((err) => {
+          this.setStatus('error');
+          this.emit({ type: 'error', data: { message: err?.message || 'Key exchange failed' } });
+        });
+        return true;
+      }
       if (message.type === 'file_metadata') {
         this.handleFileMetadata(message as FileMetadataMessage);
         return true;
@@ -327,6 +389,7 @@ export class TransferManager {
     this.chunkManager.reset();
     this.chunkManager.setMetadata(message.metadata);
     this.isCurrentFileCompressed = message.compressed;
+    this.isCurrentFileEncrypted = message.encrypted;
     this.totalBytes = message.metadata.totalSize;
     this.bytesTransferred = 0;
     this._transferStartTime = Date.now();
@@ -335,6 +398,14 @@ export class TransferManager {
 
   private async handleChunkData(data: Uint8Array): Promise<void> {
     const chunk = ChunkManager.deserializeChunk(data);
+
+    if (this.isCurrentFileEncrypted && this.encryption.isReady()) {
+      const encryptedData = this.encryption.deserializeEncryptedData(
+        chunk.data.buffer as ArrayBuffer
+      );
+      const decrypted = await this.encryption.decrypt(encryptedData);
+      chunk.data = new Uint8Array(decrypted);
+    }
 
     if (this.isCurrentFileCompressed) {
       chunk.data = await this.compression.decompress(chunk.data);
@@ -395,6 +466,8 @@ export class TransferManager {
     this.webrtc.destroy();
     this.signaling.disconnect();
     this.chunkManager.reset();
+    this.encryption.clearKeys();
+    this.keyExchangeResolve = null;
     this.eventHandlers.clear();
     this.webrtcCreated = false;
   }
