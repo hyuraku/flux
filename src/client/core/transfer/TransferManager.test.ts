@@ -70,32 +70,6 @@ vi.mock('./CompressionService', () => ({
   })),
 }));
 
-const mockEncryptionService = {
-  generateKeyPair: vi.fn().mockResolvedValue({ x: 'mockX', y: 'mockY' }),
-  deriveSharedKey: vi.fn().mockResolvedValue(undefined),
-  encrypt: vi.fn().mockImplementation(async (data: ArrayBuffer) => ({
-    ciphertext: data,
-    iv: new Uint8Array(12),
-  })),
-  decrypt: vi.fn().mockImplementation(async (encrypted: { ciphertext: ArrayBuffer }) => encrypted.ciphertext),
-  serializeEncryptedData: vi.fn().mockImplementation((data: { iv: Uint8Array; ciphertext: ArrayBuffer }) => {
-    const result = new Uint8Array(data.iv.length + new Uint8Array(data.ciphertext).length);
-    result.set(data.iv, 0);
-    result.set(new Uint8Array(data.ciphertext), data.iv.length);
-    return result.buffer;
-  }),
-  deserializeEncryptedData: vi.fn().mockImplementation((buffer: ArrayBuffer) => ({
-    iv: new Uint8Array(buffer).slice(0, 12),
-    ciphertext: new Uint8Array(buffer).slice(12).buffer,
-  })),
-  isReady: vi.fn().mockReturnValue(true),
-  clearKeys: vi.fn(),
-};
-
-vi.mock('./EncryptionService', () => ({
-  EncryptionService: vi.fn().mockImplementation(() => mockEncryptionService),
-}));
-
 describe('TransferManager', () => {
   let manager: TransferManager;
 
@@ -250,14 +224,6 @@ describe('TransferManager', () => {
 
       expect(mockChunkManager.reset).toHaveBeenCalled();
     });
-
-    it('EncryptionServiceの鍵をクリアする', async () => {
-      await manager.initializeAsReceiver();
-
-      manager.cleanup();
-
-      expect(mockEncryptionService.clearKeys).toHaveBeenCalled();
-    });
   });
 
   describe('on', () => {
@@ -360,11 +326,6 @@ describe('TransferManager', () => {
       expect((mgr as any).options.enableCompression).toBe(true);
     });
 
-    it('デフォルトで暗号化が有効', () => {
-      const mgr = new TransferManager();
-      expect((mgr as any).options.enableEncryption).toBe(true);
-    });
-
     it('デフォルトチャンクサイズは16KB', () => {
       const mgr = new TransferManager();
       expect((mgr as any).options.chunkSize).toBe(16 * 1024);
@@ -373,12 +334,10 @@ describe('TransferManager', () => {
     it('オプションをカスタマイズできる', () => {
       const mgr = new TransferManager({
         enableCompression: false,
-        enableEncryption: true,
         chunkSize: 32 * 1024,
       });
 
       expect((mgr as any).options.enableCompression).toBe(false);
-      expect((mgr as any).options.enableEncryption).toBe(true);
       expect((mgr as any).options.chunkSize).toBe(32 * 1024);
     });
   });

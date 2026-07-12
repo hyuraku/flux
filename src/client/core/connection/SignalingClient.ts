@@ -20,6 +20,34 @@ export interface SignalingEvent {
 
 export type SignalingEventHandler = (event: SignalingEvent) => void;
 
+/**
+ * PartyKit シグナリングサーバのホストを解決する。
+ *
+ * 本番ビルドでホストが未設定のまま `localhost:1999` に黙ってフォールバック
+ * すると、接続できないのにエラーも出ない状態になる。そのため本番では明示的に
+ * 例外を投げて「気づける」ようにする（dev のみ localhost をデフォルトにする）。
+ */
+function resolvePartyKitHost(): string {
+  const env = (import.meta as ImportMeta & {
+    env?: { VITE_PARTYKIT_HOST?: string; DEV?: boolean };
+  }).env;
+
+  const configured = env?.VITE_PARTYKIT_HOST?.trim();
+  if (configured) {
+    return configured;
+  }
+
+  if (env?.DEV) {
+    // ローカル開発用デフォルト（npx partykit dev）
+    return 'localhost:1999';
+  }
+
+  throw new Error(
+    'VITE_PARTYKIT_HOST is not set. The signaling server host must be ' +
+      'configured at build time for production deployments.'
+  );
+}
+
 export class SignalingClient {
   private socket: PartySocket | null = null;
   private eventHandlers: Map<SignalingEventType, Set<SignalingEventHandler>> = new Map();
@@ -27,10 +55,11 @@ export class SignalingClient {
   private peerId: string | null = null;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 3;
+  private host: string;
 
-  constructor(
-    private host: string = (import.meta as ImportMeta & { env?: { VITE_PARTYKIT_HOST?: string } }).env?.VITE_PARTYKIT_HOST ?? 'localhost:1999'
-  ) {}
+  constructor(host?: string) {
+    this.host = host ?? resolvePartyKitHost();
+  }
 
   get isConnected(): boolean {
     return this.socket?.readyState === WebSocket.OPEN;

@@ -10,10 +10,10 @@ flux is a web-based file transfer tool that sends files directly between devices
 
 ## Features
 
-- **End-to-End Encrypted** - Your files stay private
-- **Blazingly Fast** - Direct P2P transfer
-- **No Server Storage** - Data never touches our servers
-- **No File Size Limits** - Up to 2GB per transfer
+- **Encrypted in transit** - Secured by WebRTC (DTLS) between browsers
+- **Direct P2P** - Files transfer directly, device to device
+- **No Server Storage** - File data never passes through our servers
+- **Up to 2GB** - Per transfer
 - **Cross-Platform** - Works on any modern browser
 
 ## How It Works

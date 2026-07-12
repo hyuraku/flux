@@ -179,6 +179,10 @@ export function escapeHtml(text: string): string {
  * ファイル名をサニタイズ
  * - 危険な文字を除去
  * - パストラバーサル対策
+ * - 拡張子偽装対策（Unicode 双方向制御文字）
+ *
+ * ファイル名は受信側にとって未信頼の入力（送信者が完全に制御する）なので、
+ * ディスクに書き出す前・UIに表示する前に必ず通すこと。
  */
 export function sanitizeFileName(name: string): string {
   // パス区切り文字を除去
@@ -186,6 +190,11 @@ export function sanitizeFileName(name: string): string {
 
   // 制御文字を除去
   sanitized = sanitized.replace(/[\x00-\x1f\x7f]/g, '');
+
+  // Unicode 双方向制御文字を除去（拡張子偽装対策）。
+  // これらの文字は表示上の並びを反転でき、"photo<RLO>gnp.exe" を
+  // "photo exe.png" のように偽装できる。
+  sanitized = sanitized.replace(/[\u202a-\u202e\u2066-\u2069\u200e\u200f]/g, '');
 
   // 先頭の . を除去（隠しファイル対策）
   sanitized = sanitized.replace(/^\.+/, '');
