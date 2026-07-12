@@ -220,8 +220,8 @@ function AppContent() {
                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                       </svg>
                     </div>
-                    <h3 className="text-white text-sm font-medium mb-1">End-to-End Encrypted</h3>
-                    <p className="text-dim text-xs">Your files stay private</p>
+                    <h3 className="text-white text-sm font-medium mb-1">Encrypted in Transit</h3>
+                    <p className="text-dim text-xs">Secured by WebRTC (DTLS)</p>
                   </div>
                   <div className="p-4 rounded-xl bg-white/5 border border-white/10">
                     <div className="w-10 h-10 mx-auto mb-3 rounded-full bg-cyan-500/20 flex items-center justify-center">
@@ -295,7 +295,7 @@ function AppContent() {
                   <div className="group relative pl-5 py-3">
                     <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-violet-400 to-cyan-400 opacity-60 group-hover:opacity-100 transition-opacity" />
                     <h3 className="text-white/90 text-sm font-medium mb-1 group-hover:text-white transition-colors">Is it secure?</h3>
-                    <p className="text-zinc-500 text-xs leading-relaxed">Yes. All transfers are end-to-end encrypted.</p>
+                    <p className="text-zinc-500 text-xs leading-relaxed">Transfers are encrypted in transit by WebRTC (DTLS) and go directly between devices.</p>
                   </div>
                   <div className="group relative pl-5 py-3">
                     <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-violet-400 to-cyan-400 opacity-60 group-hover:opacity-100 transition-opacity" />
@@ -554,7 +554,7 @@ function AppContent() {
 
         <footer className="pb-8 text-center space-y-3">
           <p className="text-dim text-xs tracking-wide">
-            end-to-end encrypted
+            encrypted in transit
           </p>
           <a
             href="https://github.com/hyuraku/flux"
