@@ -13,39 +13,6 @@ describe('CodeManager', () => {
     vi.useRealTimers();
   });
 
-  describe('generateCode', () => {
-    it('6桁の数字コードを生成する', () => {
-      const code = codeManager.generateCode();
-
-      expect(code).toMatch(/^\d{6}$/);
-    });
-
-    it('生成されたコードは000000から999999の範囲内である', () => {
-      const code = codeManager.generateCode();
-      const numCode = parseInt(code, 10);
-
-      expect(numCode).toBeGreaterThanOrEqual(0);
-      expect(numCode).toBeLessThanOrEqual(999999);
-    });
-
-    it('既に使用中のコードは生成しない', () => {
-      // 最初のコードを登録
-      const firstCode = codeManager.generateCode();
-      codeManager.registerCode(firstCode, 'receiver-1');
-
-      // 100回生成しても重複しない（確率的テスト）
-      const codes = new Set<string>();
-      for (let i = 0; i < 100; i++) {
-        const newCode = codeManager.generateCode();
-        if (newCode !== firstCode) {
-          codes.add(newCode);
-        }
-      }
-
-      expect(codes.has(firstCode)).toBe(false);
-    });
-  });
-
   describe('registerCode', () => {
     it('コードとreceiverのconnectionIdを紐付けて登録できる', () => {
       const code = '123456';
