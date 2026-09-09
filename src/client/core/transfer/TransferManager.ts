@@ -80,6 +80,17 @@ export class TransferManager {
   private webrtcCreated = false;
   private isCurrentFileCompressed = false;
 
+  // Received messages are processed one at a time, in arrival order. Control
+  // messages (file_metadata / transfer_complete) are async-serialized together
+  // with chunks so a later message can never overtake a pending decompression.
+  private receiveQueue: Promise<void> = Promise.resolve();
+  // Bumped on cancel/cleanup so queued or in-flight work from a previous
+  // lifetime cannot mutate state or emit events afterwards.
+  private receiveGeneration = 0;
+  // Set once the queue hits an error, so only one error event is emitted and
+  // everything arriving after it is ignored.
+  private receiveFailed = false;
+
   constructor(options: TransferOptions = {}) {
     this.options = {
       enableCompression: options.enableCompression ?? true,
@@ -291,6 +302,31 @@ export class TransferManager {
   }
 
   private handleReceivedData(data: Uint8Array | string): void {
+    const generation = this.receiveGeneration;
+
+    this.receiveQueue = this.receiveQueue
+      .then(() => {
+        if (this.isReceiveStale(generation)) return;
+        return this.processReceivedData(data, generation);
+      })
+      .catch((err) => {
+        if (this.isReceiveStale(generation)) return;
+        this.receiveFailed = true;
+        this.setStatus('error');
+        this.emit({ type: 'error', data: { message: err?.message || 'Chunk processing failed' } });
+      });
+  }
+
+  /**
+   * True once this receive pipeline has been torn down (cancel/cleanup) or has
+   * already reported an error. Checked before every state mutation or event
+   * emission, including after each await.
+   */
+  private isReceiveStale(generation: number): boolean {
+    return this.receiveFailed || generation !== this.receiveGeneration;
+  }
+
+  private async processReceivedData(data: Uint8Array | string, generation: number): Promise<void> {
     if (typeof data === 'string') {
       this.tryDispatchJsonMessage(data);
       return;
@@ -302,10 +338,7 @@ export class TransferManager {
       return;
     }
 
-    this.handleChunkData(data).catch((err) => {
-      this.setStatus('error');
-      this.emit({ type: 'error', data: { message: err?.message || 'Chunk processing failed' } });
-    });
+    await this.handleChunkData(data, generation);
   }
 
   /** Attempt to parse JSON and dispatch a control message. Returns true if handled. */
@@ -342,11 +375,13 @@ export class TransferManager {
     this.lastProgressTime = Date.now();
   }
 
-  private async handleChunkData(data: Uint8Array): Promise<void> {
+  private async handleChunkData(data: Uint8Array, generation: number): Promise<void> {
     const chunk = ChunkManager.deserializeChunk(data);
 
     if (this.isCurrentFileCompressed) {
       chunk.data = await this.compression.decompress(chunk.data);
+      // The pipeline may have been torn down while decompression was pending.
+      if (this.isReceiveStale(generation)) return;
     }
 
     this.chunkManager.addChunk(chunk);
@@ -399,6 +434,11 @@ export class TransferManager {
   }
 
   cleanup(): void {
+    // Invalidate queued and in-flight receive work before tearing anything down.
+    this.receiveGeneration++;
+    this.receiveQueue = Promise.resolve();
+    this.receiveFailed = false;
+
     this.cleanupFunctions.forEach(fn => fn());
     this.cleanupFunctions = [];
     this.webrtc.destroy();
