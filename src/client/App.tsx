@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useTransfer } from './hooks/useTransfer';
 import { useIOSReconnect } from './hooks/useIOSReconnect';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -71,6 +71,24 @@ function AppContent() {
   const handleSendMode = () => {
     setMode('send');
   };
+
+  // Handle PWA shortcut launches (?mode=receive / ?mode=send).
+  // Guarded with a ref so StrictMode's double-invoke in dev doesn't
+  // initialize the receiver twice.
+  const shortcutModeHandled = useRef(false);
+  useEffect(() => {
+    if (shortcutModeHandled.current) return;
+    shortcutModeHandled.current = true;
+
+    const params = new URLSearchParams(window.location.search);
+    const shortcutMode = params.get('mode');
+    if (shortcutMode === 'receive') {
+      void handleReceiveMode();
+    } else if (shortcutMode === 'send') {
+      handleSendMode();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleDigitChange = (index: number, value: string) => {
     if (value && !/^\d$/.test(value)) return;
