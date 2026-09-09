@@ -5,6 +5,11 @@ export type TransferStatus = 'idle' | 'connecting' | 'transferring' | 'completed
 export type ErrorCode =
   | 'ROOM_FULL'
   | 'INVALID_CODE'
+  // メッセージの形（型・必須フィールド・サイズ上限）が不正
+  | 'INVALID_MESSAGE'
+  // 形は正しいが、その接続にはその操作が許可されていない
+  // （未参加・ロール違い・宛先違い など）
+  | 'NOT_AUTHORIZED'
   | 'PEER_DISCONNECTED'
   | 'LOCK_EXPIRED'
   | 'LOCK_NOT_FOUND'
@@ -141,5 +146,7 @@ export interface RoomState {
 export interface ConnectionLock {
   lockId: string;
   peerId: string;
+  // ロック発行時のピアのロール。再接続時に peers へ登録し直すために使う。
+  role?: Role;
   expiresAt: number;
 }
