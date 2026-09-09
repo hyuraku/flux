@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ChunkManager, type Chunk } from './ChunkManager';
+import { ChunkManager, MAX_CHUNK_SIZE, MAX_TRANSFER_BYTES, type Chunk } from './ChunkManager';
 import { blobToArray, toArray } from '../../test/helpers';
 
 describe('ChunkManager', () => {
@@ -127,19 +127,113 @@ describe('ChunkManager', () => {
     });
   });
 
-  describe('addChunk', () => {
-    it('重複チャンクはfalseを返す', () => {
-      manager.setMetadata({ totalChunks: 2, totalSize: 10, chunkSize: 16, fileName: 'a', fileType: 'text/plain' });
-      const chunk: Chunk = { index: 0, data: new Uint8Array([1]), size: 1 };
+  describe('setMetadata の検証', () => {
+    it('totalChunks が totalSize/chunkSize と一致しないと例外', () => {
+      expect(() =>
+        manager.setMetadata({ totalChunks: 2, totalSize: 10, chunkSize: 16, fileName: 'a', fileType: 'text/plain' })
+      ).toThrow('totalChunks');
+    });
+
+    it('fileName が空だと例外', () => {
+      expect(() =>
+        manager.setMetadata({ totalChunks: 1, totalSize: 5, chunkSize: 16, fileName: '', fileType: 'text/plain' })
+      ).toThrow('fileName');
+    });
+
+    it('totalSize が負だと例外', () => {
+      expect(() =>
+        manager.setMetadata({ totalChunks: 0, totalSize: -1, chunkSize: 16, fileName: 'a', fileType: 'text/plain' })
+      ).toThrow('totalSize');
+    });
+
+    it('totalSize が上限を超えると例外', () => {
+      const totalSize = MAX_TRANSFER_BYTES + 1;
+      expect(() =>
+        manager.setMetadata({
+          totalChunks: Math.ceil(totalSize / 16),
+          totalSize,
+          chunkSize: 16,
+          fileName: 'huge.bin',
+          fileType: 'application/octet-stream',
+        })
+      ).toThrow('exceeds the limit');
+    });
+
+    it('chunkSize が 0 だと例外', () => {
+      expect(() =>
+        manager.setMetadata({ totalChunks: 1, totalSize: 5, chunkSize: 0, fileName: 'a', fileType: 'text/plain' })
+      ).toThrow('chunkSize');
+    });
+
+    it('chunkSize が上限を超えると例外', () => {
+      expect(() =>
+        manager.setMetadata({
+          totalChunks: 1,
+          totalSize: 5,
+          chunkSize: MAX_CHUNK_SIZE + 1,
+          fileName: 'a',
+          fileType: 'text/plain',
+        })
+      ).toThrow('chunkSize');
+    });
+
+    it('空ファイル (totalSize 0, totalChunks 0) は許容される', () => {
+      expect(() =>
+        manager.setMetadata({ totalChunks: 0, totalSize: 0, chunkSize: 16, fileName: 'empty.txt', fileType: 'text/plain' })
+      ).not.toThrow();
+    });
+  });
+
+  describe('addChunk の検証', () => {
+    beforeEach(() => {
+      // 3 バイト × 1 チャンク + 最終 1 チャンク（chunkSize 3, totalSize 5）
+      manager.setMetadata({ totalChunks: 2, totalSize: 5, chunkSize: 3, fileName: 'a', fileType: 'text/plain' });
+    });
+
+    it('正しいチャンクは true を返す', () => {
+      expect(manager.addChunk({ index: 0, data: new Uint8Array(3), size: 3 })).toBe(true);
+    });
+
+    it('重複チャンクは例外', () => {
+      const chunk: Chunk = { index: 0, data: new Uint8Array(3), size: 3 };
 
       expect(manager.addChunk(chunk)).toBe(true);
-      expect(manager.addChunk(chunk)).toBe(false);
+      expect(() => manager.addChunk(chunk)).toThrow('Duplicate chunk 0');
+    });
+
+    it('範囲外の index は例外', () => {
+      expect(() => manager.addChunk({ index: 2, data: new Uint8Array(3), size: 3 })).toThrow(
+        'Invalid chunk index 2'
+      );
+      expect(() => manager.addChunk({ index: -1, data: new Uint8Array(3), size: 3 })).toThrow(
+        'Invalid chunk index -1'
+      );
+    });
+
+    it('宣言サイズと実データ長が違うと例外', () => {
+      expect(() => manager.addChunk({ index: 0, data: new Uint8Array(100), size: 3 })).toThrow(
+        'declared 3 bytes, got 100 bytes'
+      );
+    });
+
+    it('メタデータから期待されるサイズと違うと例外', () => {
+      // index 0 は chunkSize (3) ちょうどのはずだが 2 バイトで届いた
+      expect(() => manager.addChunk({ index: 0, data: new Uint8Array(2), size: 2 })).toThrow(
+        'expected 3 bytes from metadata'
+      );
+    });
+
+    it('メタデータ未設定なら例外', () => {
+      const fresh = new ChunkManager(16);
+      expect(() => fresh.addChunk({ index: 0, data: new Uint8Array(1), size: 1 })).toThrow(
+        'no metadata set'
+      );
     });
   });
 
   describe('isComplete / getMissingChunks', () => {
     beforeEach(() => {
-      manager.setMetadata({ totalChunks: 3, totalSize: 30, chunkSize: 16, fileName: 'a', fileType: 'text/plain' });
+      manager.setMetadata({ totalChunks: 3, totalSize: 30, chunkSize: 10, fileName: 'a', fileType: 'text/plain' });
     });
 
     it('メタデータ未設定時はfalseを返す', () => {
@@ -166,7 +260,7 @@ describe('ChunkManager', () => {
 
   describe('progress', () => {
     it('進捗率が正しく計算される', () => {
-      manager.setMetadata({ totalChunks: 4, totalSize: 40, chunkSize: 16, fileName: 'a', fileType: 'text/plain' });
+      manager.setMetadata({ totalChunks: 4, totalSize: 40, chunkSize: 10, fileName: 'a', fileType: 'text/plain' });
       manager.addChunk({ index: 0, data: new Uint8Array(10), size: 10 });
       manager.addChunk({ index: 1, data: new Uint8Array(10), size: 10 });
 
@@ -176,7 +270,7 @@ describe('ChunkManager', () => {
 
   describe('reset', () => {
     it('リセット後に全状態がクリアされる', () => {
-      manager.setMetadata({ totalChunks: 1, totalSize: 5, chunkSize: 16, fileName: 'a', fileType: 'text/plain' });
+      manager.setMetadata({ totalChunks: 1, totalSize: 5, chunkSize: 5, fileName: 'a', fileType: 'text/plain' });
       manager.addChunk({ index: 0, data: new Uint8Array(5), size: 5 });
 
       manager.reset();

@@ -18,9 +18,10 @@ export class CompressionService {
   }
 
   async compress(data: Uint8Array): Promise<Uint8Array> {
+    // 非対応環境で入力をそのまま返すと、相手には「圧縮済み」と伝わったまま
+    // 生データが流れて破損する。黙って劣化させず、呼び出し側に失敗を伝える。
     if (!CompressionService.isSupported()) {
-      console.warn('CompressionStream not supported, returning uncompressed data');
-      return data;
+      throw new Error('CompressionStream is not supported in this browser');
     }
 
     // Create a copy to ensure we have a proper ArrayBuffer
@@ -34,9 +35,10 @@ export class CompressionService {
   }
 
   async decompress(data: Uint8Array): Promise<Uint8Array> {
+    // 圧縮済みデータをそのまま返すと破損ファイルが「成功」として扱われる。
+    // 解凍できないことは転送の失敗として扱う。
     if (!CompressionService.isSupported()) {
-      console.warn('DecompressionStream not supported, returning data as-is');
-      return data;
+      throw new Error('DecompressionStream is not supported in this browser');
     }
 
     // Create a copy to ensure we have a proper ArrayBuffer

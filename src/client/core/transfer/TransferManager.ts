@@ -1,9 +1,20 @@
 import { SignalingClient } from '../connection/SignalingClient';
 import { WebRTCConnection } from '../connection/WebRTCConnection';
-import { ChunkManager, type ChunkMetadata } from './ChunkManager';
+import { ChunkManager, MAX_TRANSFER_BYTES, type ChunkMetadata } from './ChunkManager';
 import { CompressionService } from './CompressionService';
 import { generateCode } from '../../utils/codeGenerator';
 import { sanitizeFileName } from '../../utils/validators';
+
+/**
+ * 転送プロトコルのバージョン。受信側が能力を通知しない、または別バージョンを
+ * 名乗る場合は互換性がないものとして明示的に失敗させる。
+ */
+export const PROTOCOL_VERSION = 2;
+
+/** 接続後、receiver_capabilities を待つ時間 */
+export const CAPABILITY_TIMEOUT_MS = 5000;
+
+export const INCOMPATIBLE_RECEIVER_MESSAGE = 'Receiver is running an incompatible version';
 
 export type TransferStatus =
   | 'idle'
@@ -46,14 +57,62 @@ export interface TransferEvent {
 
 export type TransferEventHandler = (event: TransferEvent) => void;
 
+export interface ReceiverCapabilities {
+  protocolVersion: number;
+  supportsDecompression: boolean;
+  maxTransferBytes: number;
+}
+
+interface ReceiverCapabilitiesMessage extends ReceiverCapabilities {
+  type: 'receiver_capabilities';
+}
+
 interface FileMetadataMessage {
   type: 'file_metadata';
+  fileIndex: number;
   metadata: ChunkMetadata;
   compressed: boolean;
 }
 
+interface FileAckMessage {
+  type: 'file_ack';
+  fileIndex: number;
+  fileName: string;
+  size: number;
+}
+
+interface TransferErrorMessage {
+  type: 'transfer_error';
+  message: string;
+}
+
 interface TransferCompleteMessage {
   type: 'transfer_complete';
+}
+
+type ControlMessage = { type: string } & Record<string, unknown>;
+
+/**
+ * 制御メッセージとして解釈できれば返す。JSON でない、あるいは type を持たない
+ * 場合は null（呼び出し側でチャンクとして扱う）。
+ */
+function parseControlMessage(text: string): ControlMessage | null {
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === 'object' && typeof parsed.type === 'string') {
+      return parsed as ControlMessage;
+    }
+  } catch {
+    // Not valid JSON -- caller decides what to do next
+  }
+  return null;
+}
+
+/** タイマー付きの待機。cancel / cleanup / 切断 / エラーで必ず解放する。 */
+interface PendingWaiter<T> {
+  resolve: (value: T) => void;
+  reject: (reason: Error) => void;
+  timer: ReturnType<typeof setTimeout> | null;
 }
 
 export class TransferManager {
@@ -79,6 +138,17 @@ export class TransferManager {
   private cleanupFunctions: (() => void)[] = [];
   private webrtcCreated = false;
   private isCurrentFileCompressed = false;
+
+  // --- 送信側: 能力交換と ACK 待ち ---
+  private receiverCapabilities: ReceiverCapabilities | null = null;
+  private capabilityWaiter: PendingWaiter<ReceiverCapabilities> | null = null;
+  private ackWaiter: (PendingWaiter<void> & { fileIndex: number }) | null = null;
+
+  // --- 受信側: ファイル単位の進行状況 ---
+  private currentFileIndex: number | null = null;
+  private announcedFiles: Set<number> = new Set();
+  private ackedFiles: Set<number> = new Set();
+  private receivedTotalSize = 0;
 
   // Received messages are processed one at a time, in arrival order. Control
   // messages (file_metadata / transfer_complete) are async-serialized together
@@ -199,6 +269,7 @@ export class TransferManager {
     });
 
     const cleanup5 = this.signaling.on('error', (event) => {
+      this.rejectPendingWaiters(new Error('Signaling error'));
       this.setStatus('error');
       this.emit({ type: 'error', data: event.data });
     });
@@ -227,12 +298,12 @@ export class TransferManager {
     // transfer immediately.
     const cleanup2 = this.webrtc.on('connected', () => {
       if (this.role === 'sender') {
-        this.startSending().catch((err) => {
-          this.setStatus('error');
-          this.emit({ type: 'error', data: { message: err?.message || 'Transfer failed' } });
+        this.startSending().catch((err: unknown) => {
+          this.failTransfer(err instanceof Error ? err.message : 'Transfer failed');
         });
       } else {
         this.setStatus('transferring');
+        this.sendCapabilities();
       }
     });
 
@@ -241,11 +312,13 @@ export class TransferManager {
     });
 
     const cleanup4 = this.webrtc.on('error', (event) => {
+      this.rejectPendingWaiters(new Error('Connection error'));
       this.setStatus('error');
       this.emit({ type: 'error', data: event.data });
     });
 
     const cleanup5 = this.webrtc.on('disconnected', () => {
+      this.rejectPendingWaiters(new Error('Connection lost'));
       if (this.status !== 'completed' && this.status !== 'cancelled') {
         this.setStatus('error');
         this.emit({ type: 'error', data: { message: 'Connection lost' } });
@@ -260,8 +333,18 @@ export class TransferManager {
     this._transferStartTime = Date.now();
     this.lastProgressTime = Date.now();
 
-    for (const file of this.files) {
-      await this.sendFile(file);
+    // 受信側の能力が分かるまでは 1 バイトも送らない。旧クライアントは
+    // capabilities を送らないので、ここでタイムアウトして明示的に失敗する。
+    const capabilities = await this.waitForCapabilities();
+
+    if (this.totalBytes > capabilities.maxTransferBytes) {
+      throw new Error(
+        `Receiver accepts at most ${capabilities.maxTransferBytes} bytes, but the transfer is ${this.totalBytes} bytes`
+      );
+    }
+
+    for (let fileIndex = 0; fileIndex < this.files.length; fileIndex++) {
+      await this.sendFile(this.files[fileIndex], fileIndex, capabilities);
     }
 
     this.webrtc.sendJSON({ type: 'transfer_complete' } as TransferCompleteMessage);
@@ -269,14 +352,27 @@ export class TransferManager {
     this.emit({ type: 'transfer_complete' });
   }
 
-  private async sendFile(file: File): Promise<void> {
+  private async sendFile(
+    file: File,
+    fileIndex: number,
+    capabilities: ReceiverCapabilities
+  ): Promise<void> {
     const metadata = this.chunkManager.createMetadata(file);
+    // 圧縮は双方が対応している場合にのみ使う。受信側が解凍できない環境なら
+    // 圧縮せずに送る（送信側の環境だけで決めない）。
     const shouldCompress = this.options.enableCompression &&
       CompressionService.isSupported() &&
+      capabilities.supportsDecompression &&
       this.compression.shouldCompress(file.size);
+
+    // ACK は最後のチャンクの直後に届き得るので、送信前に待機を登録しておく。
+    const ackReceived = this.waitForAck(fileIndex);
+    // 送信中に reject されても unhandled rejection にしない（下で await する）。
+    ackReceived.catch(() => {});
 
     const metadataMsg: FileMetadataMessage = {
       type: 'file_metadata',
+      fileIndex,
       metadata,
       compressed: shouldCompress,
     };
@@ -299,6 +395,144 @@ export class TransferManager {
 
       await new Promise(resolve => setTimeout(resolve, 1));
     }
+
+    // 受信側の検証が通るまで次のファイルへ進まない。
+    await ackReceived;
+  }
+
+  private waitForCapabilities(): Promise<ReceiverCapabilities> {
+    if (this.receiverCapabilities) {
+      return Promise.resolve(this.receiverCapabilities);
+    }
+
+    return new Promise<ReceiverCapabilities>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.capabilityWaiter = null;
+        reject(new Error(INCOMPATIBLE_RECEIVER_MESSAGE));
+      }, CAPABILITY_TIMEOUT_MS);
+
+      this.capabilityWaiter = { resolve, reject, timer };
+    });
+  }
+
+  private waitForAck(fileIndex: number): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      this.ackWaiter = { fileIndex, resolve, reject, timer: null };
+    });
+  }
+
+  /**
+   * 待機中の Promise を全て reject する。待機が永久に残らないよう、
+   * cancel / cleanup / 切断 / エラー / 受信側エラーの全経路から呼ぶ。
+   * 何かを reject した場合に true を返す。
+   */
+  private rejectPendingWaiters(reason: Error): boolean {
+    let rejected = false;
+
+    if (this.capabilityWaiter) {
+      const waiter = this.capabilityWaiter;
+      this.capabilityWaiter = null;
+      if (waiter.timer !== null) clearTimeout(waiter.timer);
+      waiter.reject(reason);
+      rejected = true;
+    }
+
+    if (this.ackWaiter) {
+      const waiter = this.ackWaiter;
+      this.ackWaiter = null;
+      if (waiter.timer !== null) clearTimeout(waiter.timer);
+      waiter.reject(reason);
+      rejected = true;
+    }
+
+    return rejected;
+  }
+
+  /** 送信側の転送失敗。すでに終了状態なら二重に報告しない。 */
+  private failTransfer(message: string): void {
+    if (this.status === 'cancelled' || this.status === 'completed' || this.status === 'error') {
+      return;
+    }
+    this.setStatus('error');
+    this.emit({ type: 'error', data: { message } });
+  }
+
+  private sendCapabilities(): void {
+    const message: ReceiverCapabilitiesMessage = {
+      type: 'receiver_capabilities',
+      protocolVersion: PROTOCOL_VERSION,
+      supportsDecompression: CompressionService.isSupported(),
+      maxTransferBytes: MAX_TRANSFER_BYTES,
+    };
+    this.webrtc.sendJSON(message);
+  }
+
+  private handleReceiverCapabilities(message: ReceiverCapabilitiesMessage): void {
+    if (this.role !== 'sender') return;
+
+    const capabilities: ReceiverCapabilities = {
+      protocolVersion: message.protocolVersion,
+      supportsDecompression: message.supportsDecompression === true,
+      maxTransferBytes:
+        typeof message.maxTransferBytes === 'number' && message.maxTransferBytes >= 0
+          ? message.maxTransferBytes
+          : 0,
+    };
+
+    if (capabilities.protocolVersion !== PROTOCOL_VERSION) {
+      const waiter = this.capabilityWaiter;
+      this.capabilityWaiter = null;
+      if (waiter) {
+        if (waiter.timer !== null) clearTimeout(waiter.timer);
+        waiter.reject(new Error(INCOMPATIBLE_RECEIVER_MESSAGE));
+      } else {
+        this.failTransfer(INCOMPATIBLE_RECEIVER_MESSAGE);
+      }
+      return;
+    }
+
+    this.receiverCapabilities = capabilities;
+
+    const waiter = this.capabilityWaiter;
+    this.capabilityWaiter = null;
+    if (waiter) {
+      if (waiter.timer !== null) clearTimeout(waiter.timer);
+      waiter.resolve(capabilities);
+    }
+  }
+
+  private handleFileAck(message: FileAckMessage): void {
+    if (this.role !== 'sender') return;
+
+    const waiter = this.ackWaiter;
+    if (!waiter) return;
+
+    if (message.fileIndex !== waiter.fileIndex) {
+      this.ackWaiter = null;
+      if (waiter.timer !== null) clearTimeout(waiter.timer);
+      waiter.reject(
+        new Error(`Unexpected ack for file ${message.fileIndex}, expected ${waiter.fileIndex}`)
+      );
+      return;
+    }
+
+    this.ackWaiter = null;
+    if (waiter.timer !== null) clearTimeout(waiter.timer);
+    waiter.resolve();
+  }
+
+  /** 受信側が報告したエラー。送信側は成功表示せず error にする。 */
+  private handleTransferError(message: TransferErrorMessage): void {
+    if (this.role !== 'sender') return;
+
+    const text = typeof message.message === 'string' && message.message.length > 0
+      ? message.message
+      : 'Receiver reported a transfer error';
+
+    // 待機中なら startSending 側の catch で status / event を出す。
+    if (this.rejectPendingWaiters(new Error(text))) return;
+
+    this.failTransfer(text);
   }
 
   private handleReceivedData(data: Uint8Array | string): void {
@@ -312,8 +546,12 @@ export class TransferManager {
       .catch((err) => {
         if (this.isReceiveStale(generation)) return;
         this.receiveFailed = true;
+        const message = err?.message || 'Chunk processing failed';
+        // 受信側で失敗したことを送信側にも伝える。伝えないと送信側は
+        // 全チャンク送信後に成功として完了してしまう。
+        this.reportErrorToSender(message);
         this.setStatus('error');
-        this.emit({ type: 'error', data: { message: err?.message || 'Chunk processing failed' } });
+        this.emit({ type: 'error', data: { message } });
       });
   }
 
@@ -328,47 +566,96 @@ export class TransferManager {
 
   private async processReceivedData(data: Uint8Array | string, generation: number): Promise<void> {
     if (typeof data === 'string') {
-      this.tryDispatchJsonMessage(data);
+      this.dispatchControlMessage(parseControlMessage(data));
       return;
     }
 
     // Binary data may be a JSON control message or a chunk
     const text = new TextDecoder().decode(data);
-    if (this.tryDispatchJsonMessage(text)) {
+    if (this.dispatchControlMessage(parseControlMessage(text))) {
       return;
     }
 
     await this.handleChunkData(data, generation);
   }
 
-  /** Attempt to parse JSON and dispatch a control message. Returns true if handled. */
-  private tryDispatchJsonMessage(text: string): boolean {
-    try {
-      const message = JSON.parse(text);
-      if (message.type === 'file_metadata') {
-        this.handleFileMetadata(message as FileMetadataMessage);
+  /**
+   * 制御メッセージをディスパッチする。処理した場合に true を返す。
+   * ハンドラが投げた例外は受信キューの catch まで伝播させる（握り潰さない）。
+   */
+  private dispatchControlMessage(message: ControlMessage | null): boolean {
+    if (!message) return false;
+
+    switch (message.type) {
+      case 'receiver_capabilities':
+        this.handleReceiverCapabilities(message as unknown as ReceiverCapabilitiesMessage);
         return true;
-      }
-      if (message.type === 'transfer_complete') {
+      case 'file_ack':
+        this.handleFileAck(message as unknown as FileAckMessage);
+        return true;
+      case 'transfer_error':
+        this.handleTransferError(message as unknown as TransferErrorMessage);
+        return true;
+      case 'file_metadata':
+        this.handleFileMetadata(message as unknown as FileMetadataMessage);
+        return true;
+      case 'transfer_complete':
         this.handleTransferComplete();
         return true;
-      }
-    } catch {
-      // Not valid JSON -- caller decides what to do next
+      default:
+        return false;
     }
-    return false;
   }
 
   private handleFileMetadata(message: FileMetadataMessage): void {
+    if (this.role !== 'receiver') return;
+
+    // 圧縮を解けない環境では、破損したファイルを成功として扱わず明示的に失敗する。
+    if (message.compressed === true && !CompressionService.isSupported()) {
+      throw new Error(
+        'Received compressed data but this browser cannot decompress it (DecompressionStream is unavailable)'
+      );
+    }
+
+    if (!Number.isInteger(message.fileIndex) || message.fileIndex < 0) {
+      throw new Error(`Invalid file index: ${message.fileIndex}`);
+    }
+
+    if (this.announcedFiles.has(message.fileIndex)) {
+      throw new Error(`Duplicate metadata for file ${message.fileIndex}`);
+    }
+
+    // 前のファイルが未完了のまま次の metadata が来るのはプロトコル違反。
+    const previous = this.chunkManager.getMetadata();
+    if (previous && !this.chunkManager.isComplete()) {
+      throw new Error(`Metadata for file ${message.fileIndex} arrived before the previous file completed`);
+    }
+
+    if (!message.metadata || typeof message.metadata !== 'object') {
+      throw new Error('Invalid metadata: not an object');
+    }
+
     // The file name comes from the (untrusted) sender, so sanitize it at the
     // trust boundary before it flows to the File object, the UI, or disk.
     const metadata: ChunkMetadata = {
       ...message.metadata,
       fileName: sanitizeFileName(message.metadata.fileName),
     };
+
+    // 転送全体の合計にも上限を効かせる（1 ファイルずつ小さくても総量は制限する）。
+    const nextTotal = this.receivedTotalSize + (metadata.totalSize ?? 0);
+    if (nextTotal > MAX_TRANSFER_BYTES) {
+      throw new Error(
+        `Transfer exceeds the receive limit of ${MAX_TRANSFER_BYTES} bytes`
+      );
+    }
+
     this.chunkManager.reset();
     this.chunkManager.setMetadata(metadata);
-    this.isCurrentFileCompressed = message.compressed;
+    this.receivedTotalSize = nextTotal;
+    this.announcedFiles.add(message.fileIndex);
+    this.currentFileIndex = message.fileIndex;
+    this.isCurrentFileCompressed = message.compressed === true;
     this.totalBytes = metadata.totalSize;
     this.bytesTransferred = 0;
     this._transferStartTime = Date.now();
@@ -382,6 +669,13 @@ export class TransferManager {
       chunk.data = await this.compression.decompress(chunk.data);
       // The pipeline may have been torn down while decompression was pending.
       if (this.isReceiveStale(generation)) return;
+
+      // 解凍結果が宣言サイズと違うなら、そのまま結合せず失敗させる。
+      if (chunk.data.byteLength !== chunk.size) {
+        throw new Error(
+          `Chunk ${chunk.index} size mismatch after decompression: declared ${chunk.size} bytes, got ${chunk.data.byteLength} bytes`
+        );
+      }
     }
 
     this.chunkManager.addChunk(chunk);
@@ -390,13 +684,40 @@ export class TransferManager {
 
     if (this.chunkManager.isComplete()) {
       const file = this.chunkManager.toFile();
+      const fileIndex = this.currentFileIndex ?? 0;
+      this.ackedFiles.add(fileIndex);
+      this.webrtc.sendJSON({
+        type: 'file_ack',
+        fileIndex,
+        fileName: file.name,
+        size: file.size,
+      } as FileAckMessage);
       this.emit({ type: 'file_received', data: file });
     }
   }
 
   private handleTransferComplete(): void {
+    // 完了宣言は送信側だけが出す。送信側は自分の ACK 集計で完了を決めるので、
+    // 相手からの transfer_complete では成功にしない。
+    if (this.role !== 'receiver') return;
+
+    const unfinished = [...this.announcedFiles].filter(index => !this.ackedFiles.has(index));
+    if (unfinished.length > 0) {
+      throw new Error(`Transfer ended with unfinished files: ${unfinished.join(', ')}`);
+    }
+
     this.setStatus('completed');
     this.emit({ type: 'transfer_complete' });
+  }
+
+  /** 受信側の失敗を送信側に伝える。チャネルが閉じていても投げない。 */
+  private reportErrorToSender(message: string): void {
+    if (this.role !== 'receiver') return;
+    try {
+      this.webrtc.sendJSON({ type: 'transfer_error', message } as TransferErrorMessage);
+    } catch {
+      // 送れなければ諦める。受信側の error 通知は別途発火する。
+    }
   }
 
   private updateProgress(): void {
@@ -438,6 +759,14 @@ export class TransferManager {
     this.receiveGeneration++;
     this.receiveQueue = Promise.resolve();
     this.receiveFailed = false;
+
+    // 能力待ち・ACK 待ちを解放する（残すと送信側が永久に待つ）。
+    this.rejectPendingWaiters(new Error('Transfer stopped'));
+    this.receiverCapabilities = null;
+    this.currentFileIndex = null;
+    this.announcedFiles.clear();
+    this.ackedFiles.clear();
+    this.receivedTotalSize = 0;
 
     this.cleanupFunctions.forEach(fn => fn());
     this.cleanupFunctions = [];
