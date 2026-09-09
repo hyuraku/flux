@@ -93,19 +93,18 @@ describe('Transfer Pipeline 統合テスト', () => {
       expect(receivedBytes).toEqual(originalBytes);
     });
 
-    it('解凍せずに結合するとデータが一致しない（バグの再現）', async () => {
+    it('解凍せずに結合するとサイズ検証で弾かれる', async () => {
       const content = 'CompressMe! '.repeat(1000);
       const file = new File([content], 'broken.txt', { type: 'text/plain' });
       const cm = new ChunkManager(chunkSize);
       const metadata = cm.createMetadata(file);
 
       const serializedChunks = await senderPipeline(file, chunkSize, true);
-      // 意図的に isCompressed=false で受信（解凍しない = バグの再現）
-      const broken = await receiverPipeline(serializedChunks, metadata, false);
-
-      const brokenBytes = await blobToArray(broken);
-      const originalBytes = toArray(new TextEncoder().encode(content));
-      expect(brokenBytes).not.toEqual(originalBytes);
+      // 意図的に isCompressed=false で受信（解凍しない）。以前は破損ファイルが
+      // そのまま組み上がっていたが、今はチャンクのサイズ検証で失敗する。
+      await expect(receiverPipeline(serializedChunks, metadata, false)).rejects.toThrow(
+        'size mismatch'
+      );
     });
 
     it('compressed=falseなら解凍をスキップしても正常', async () => {

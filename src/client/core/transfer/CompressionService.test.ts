@@ -70,7 +70,7 @@ describe('CompressionService', () => {
     });
   });
 
-  describe('CompressionStream利用不可時のフォールバック', () => {
+  describe('CompressionStream利用不可時の挙動', () => {
     let originalCS: typeof globalThis.CompressionStream;
     let originalDS: typeof globalThis.DecompressionStream;
 
@@ -90,16 +90,16 @@ describe('CompressionService', () => {
       expect(CompressionService.isSupported()).toBe(false);
     });
 
-    it('compressはデータをそのまま返す', async () => {
+    // 非対応時にデータをそのまま返すと、相手には圧縮済みと伝わったまま
+    // 生データが流れて破損ファイルが「成功」になる。明示的に失敗させる。
+    it('compressは例外を投げる', async () => {
       const data = new Uint8Array([1, 2, 3]);
-      const result = await service.compress(data);
-      expect(result).toEqual(data);
+      await expect(service.compress(data)).rejects.toThrow('CompressionStream is not supported');
     });
 
-    it('decompressはデータをそのまま返す', async () => {
+    it('decompressは例外を投げる', async () => {
       const data = new Uint8Array([4, 5, 6]);
-      const result = await service.decompress(data);
-      expect(result).toEqual(data);
+      await expect(service.decompress(data)).rejects.toThrow('DecompressionStream is not supported');
     });
   });
 

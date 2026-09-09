@@ -1,3 +1,5 @@
+import { MAX_FILE_SIZE } from '../../utils/validators';
+
 export interface Chunk {
   index: number;
   data: Uint8Array;
@@ -11,6 +13,19 @@ export interface ChunkMetadata {
   chunkSize: number;
   fileName: string;
   fileType: string;
+}
+
+/**
+ * 受信側が受け入れる転送の上限。送信 UI の検証（validators.MAX_FILE_SIZE）と
+ * 同じ値を使い、受信境界でも同じ上限を強制する。
+ */
+export const MAX_TRANSFER_BYTES = MAX_FILE_SIZE;
+
+/** 受信側が受け入れる chunkSize の上限（16 MiB） */
+export const MAX_CHUNK_SIZE = 16 * 1024 * 1024;
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
 }
 
 export class ChunkManager {
@@ -39,8 +54,60 @@ export class ChunkManager {
     return (this.receivedChunks.size / this.metadata.totalChunks) * 100;
   }
 
+  /**
+   * メタデータを設定する。メタデータは送信者が完全に制御する未信頼入力なので、
+   * ここで内部整合性と上限を検証する。違反時は例外を投げる。
+   */
   setMetadata(metadata: ChunkMetadata): void {
+    if (!metadata || typeof metadata !== 'object') {
+      throw new Error('Invalid metadata: not an object');
+    }
+
+    if (typeof metadata.fileName !== 'string' || metadata.fileName.length === 0) {
+      throw new Error('Invalid metadata: fileName must be a non-empty string');
+    }
+
+    if (!isNonNegativeInteger(metadata.totalSize)) {
+      throw new Error('Invalid metadata: totalSize must be a non-negative integer');
+    }
+
+    if (metadata.totalSize > MAX_TRANSFER_BYTES) {
+      throw new Error(
+        `Invalid metadata: totalSize ${metadata.totalSize} exceeds the limit of ${MAX_TRANSFER_BYTES} bytes`
+      );
+    }
+
+    if (!isNonNegativeInteger(metadata.chunkSize) || metadata.chunkSize === 0) {
+      throw new Error('Invalid metadata: chunkSize must be a positive integer');
+    }
+
+    if (metadata.chunkSize > MAX_CHUNK_SIZE) {
+      throw new Error(
+        `Invalid metadata: chunkSize ${metadata.chunkSize} exceeds the limit of ${MAX_CHUNK_SIZE} bytes`
+      );
+    }
+
+    if (!isNonNegativeInteger(metadata.totalChunks)) {
+      throw new Error('Invalid metadata: totalChunks must be a non-negative integer');
+    }
+
+    const expectedChunks = Math.ceil(metadata.totalSize / metadata.chunkSize);
+    if (metadata.totalChunks !== expectedChunks) {
+      throw new Error(
+        `Invalid metadata: totalChunks ${metadata.totalChunks} does not match totalSize/chunkSize (expected ${expectedChunks})`
+      );
+    }
+
     this.metadata = metadata;
+  }
+
+  /** index 番目のチャンクが持つべきバイト数 */
+  private expectedChunkSize(index: number): number {
+    const metadata = this.metadata!;
+    const isLast = index === metadata.totalChunks - 1;
+    return isLast
+      ? metadata.totalSize - (metadata.totalChunks - 1) * metadata.chunkSize
+      : metadata.chunkSize;
   }
 
   getMetadata(): ChunkMetadata | null {
@@ -77,9 +144,42 @@ export class ChunkManager {
     };
   }
 
+  /**
+   * 受信チャンクを取り込む。index・サイズはいずれも未信頼入力なので、
+   * メタデータから導かれる期待値と突き合わせる。違反時は例外を投げる。
+   *
+   * データチャネルは順序保証付きなので、重複到着は異常として扱う。
+   */
   addChunk(chunk: Chunk): boolean {
+    if (!this.metadata) {
+      throw new Error('Cannot add chunk: no metadata set');
+    }
+
+    if (!isNonNegativeInteger(chunk.index) || chunk.index >= this.metadata.totalChunks) {
+      throw new Error(
+        `Invalid chunk index ${chunk.index}: expected 0..${this.metadata.totalChunks - 1}`
+      );
+    }
+
     if (this.receivedChunks.has(chunk.index)) {
-      return false; // Duplicate chunk
+      throw new Error(`Duplicate chunk ${chunk.index}`);
+    }
+
+    if (!isNonNegativeInteger(chunk.size)) {
+      throw new Error(`Invalid chunk size ${chunk.size}: must be a non-negative integer`);
+    }
+
+    if (chunk.data.byteLength !== chunk.size) {
+      throw new Error(
+        `Chunk ${chunk.index} size mismatch: declared ${chunk.size} bytes, got ${chunk.data.byteLength} bytes`
+      );
+    }
+
+    const expected = this.expectedChunkSize(chunk.index);
+    if (chunk.size !== expected) {
+      throw new Error(
+        `Chunk ${chunk.index} size mismatch: expected ${expected} bytes from metadata, got ${chunk.size} bytes`
+      );
     }
 
     this.receivedChunks.set(chunk.index, chunk.data);
@@ -114,16 +214,25 @@ export class ChunkManager {
 
     // Collect chunks in order
     const chunks: ArrayBuffer[] = [];
+    let mergedBytes = 0;
     for (let i = 0; i < this.metadata.totalChunks; i++) {
       const chunk = this.receivedChunks.get(i);
       if (!chunk) {
         throw new Error(`Missing chunk ${i}`);
       }
+      mergedBytes += chunk.byteLength;
       // Ensure we get a proper ArrayBuffer (not SharedArrayBuffer)
       const buffer = chunk.buffer instanceof ArrayBuffer
         ? chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength)
         : new Uint8Array(chunk).buffer;
       chunks.push(buffer as ArrayBuffer);
+    }
+
+    // 各チャンクは addChunk で検証済みだが、File 化の直前に合計も突き合わせる。
+    if (mergedBytes !== this.metadata.totalSize) {
+      throw new Error(
+        `Received size mismatch: expected ${this.metadata.totalSize} bytes, got ${mergedBytes} bytes`
+      );
     }
 
     return new Blob(chunks, { type: this.metadata.fileType });
