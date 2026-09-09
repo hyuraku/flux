@@ -161,4 +161,72 @@ describe('CodeManager', () => {
       expect(codeManager.isLockedOut(ip)).toBe(false);
     });
   });
+
+  describe('しきい値の差し替え（ルーム横断リミッター用）', () => {
+    it('渡した設定のしきい値が使われる', () => {
+      const limiter = new CodeManager({
+        windowMs: 60 * 1000,
+        maxAttempts: 30,
+        lockoutThreshold: 10,
+        lockoutMs: 5 * 60 * 1000,
+        failureWindowMs: 5 * 60 * 1000,
+      });
+      const ip = '203.0.113.10';
+
+      // 既定（10回）を超えても、maxAttempts=30 までは通る
+      for (let i = 0; i < 30; i++) {
+        expect(limiter.checkRateLimit(ip)).toBe(true);
+        limiter.recordAttempt(ip);
+      }
+      expect(limiter.checkRateLimit(ip)).toBe(false);
+
+      // 既定（3回）を超えても、lockoutThreshold=10 までロックされない
+      for (let i = 0; i < 9; i++) {
+        limiter.recordFailedAttempt(ip);
+      }
+      expect(limiter.isLockedOut(ip)).toBe(false);
+
+      limiter.recordFailedAttempt(ip);
+      expect(limiter.isLockedOut(ip)).toBe(true);
+    });
+
+    it('failureWindowMsを過ぎた失敗は数え直す（共有IPの巻き添え防止）', () => {
+      const limiter = new CodeManager({
+        windowMs: 60 * 1000,
+        maxAttempts: 30,
+        lockoutThreshold: 3,
+        lockoutMs: 5 * 60 * 1000,
+        failureWindowMs: 5 * 60 * 1000,
+      });
+      const ip = '203.0.113.11';
+      const now = Date.now();
+      vi.setSystemTime(now);
+
+      limiter.recordFailedAttempt(ip);
+      limiter.recordFailedAttempt(ip);
+
+      // ウィンドウを過ぎたので、ここからは1回目として数え直される
+      vi.setSystemTime(now + 5 * 60 * 1000 + 1);
+      limiter.recordFailedAttempt(ip);
+      limiter.recordFailedAttempt(ip);
+      expect(limiter.isLockedOut(ip)).toBe(false);
+
+      limiter.recordFailedAttempt(ip);
+      expect(limiter.isLockedOut(ip)).toBe(true);
+    });
+
+    it('既定（failureWindowMs=null）では失敗が時間で失効しない', () => {
+      const ip = '203.0.113.12';
+      const now = Date.now();
+      vi.setSystemTime(now);
+
+      codeManager.recordFailedAttempt(ip);
+      codeManager.recordFailedAttempt(ip);
+
+      vi.setSystemTime(now + 60 * 60 * 1000);
+      codeManager.recordFailedAttempt(ip);
+
+      expect(codeManager.isLockedOut(ip)).toBe(true);
+    });
+  });
 });

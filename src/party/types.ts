@@ -143,6 +143,27 @@ export interface RoomState {
   locks: Map<string, ConnectionLock>;
 }
 
+// ルーム横断レート制限（転送ルーム → リミッタールームの内部HTTP API）
+
+export type RateLimiterAction = 'check' | 'record_failure' | 'record_success';
+
+export interface RateLimiterRequest {
+  action: RateLimiterAction;
+  /** 制限のキー（接続元IP。取得できない場合は接続ID） */
+  key: string;
+}
+
+export type RateLimitDenyReason =
+  // 単位時間あたりの試行数が多すぎる
+  | 'rate_limited'
+  // 失敗が続いてロックアウト中
+  | 'locked_out';
+
+export interface RateLimiterResponse {
+  allowed: boolean;
+  reason?: RateLimitDenyReason;
+}
+
 export interface ConnectionLock {
   lockId: string;
   peerId: string;
