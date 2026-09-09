@@ -12,16 +12,14 @@
     "party:dev": "partykit dev"
   },
   "dependencies": {
-    "@tailwindcss/postcss": "^4.1.18",
     "file-saver": "^2.0.5",
-    "nanoid": "^5.0.0",
     "partysocket": "^1.0.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router": "^7.1.0",
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.18",
     "@testing-library/jest-dom": "^6.6.0",
     "@testing-library/react": "^16.0.0",
     "@testing-library/user-event": "^14.5.2",
@@ -34,7 +32,7 @@
     "autoprefixer": "^10.4.20",
     "jsdom": "^25.0.0",
     "partykit": "^0.0.111",
-    "postcss": "^8.4.49",
+    "postcss": "^8.5.28",
     "tailwindcss": "^4.0.0",
     "terser": "^5.46.0",
     "typescript": "^5.6.0",

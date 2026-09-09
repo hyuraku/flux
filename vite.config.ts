@@ -30,7 +30,6 @@ export default defineConfig(({ command }) => {
         output: {
           manualChunks: {
             vendor: ['react', 'react-dom'],
-            router: ['react-router'],
             state: ['zustand'],
           },
         },
