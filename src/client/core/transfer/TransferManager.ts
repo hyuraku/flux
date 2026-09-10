@@ -143,6 +143,9 @@ export class TransferManager {
   private receiverCapabilities: ReceiverCapabilities | null = null;
   private capabilityWaiter: PendingWaiter<ReceiverCapabilities> | null = null;
   private ackWaiter: (PendingWaiter<void> & { fileIndex: number }) | null = null;
+  // 送信ループのキャンセル。バッファ空き待ちに渡し、rejectPendingWaiters から
+  // abort することで待機中のループを即座に解放する。送信中のみ非 null。
+  private sendAbort: AbortController | null = null;
 
   // --- 受信側: ファイル単位の進行状況 ---
   private currentFileIndex: number | null = null;
@@ -333,29 +336,48 @@ export class TransferManager {
     this._transferStartTime = Date.now();
     this.lastProgressTime = Date.now();
 
-    // 受信側の能力が分かるまでは 1 バイトも送らない。旧クライアントは
-    // capabilities を送らないので、ここでタイムアウトして明示的に失敗する。
-    const capabilities = await this.waitForCapabilities();
+    const abort = new AbortController();
+    this.sendAbort = abort;
 
-    if (this.totalBytes > capabilities.maxTransferBytes) {
-      throw new Error(
-        `Receiver accepts at most ${capabilities.maxTransferBytes} bytes, but the transfer is ${this.totalBytes} bytes`
-      );
+    try {
+      // 受信側の能力が分かるまでは 1 バイトも送らない。旧クライアントは
+      // capabilities を送らないので、ここでタイムアウトして明示的に失敗する。
+      const capabilities = await this.waitForCapabilities();
+
+      if (this.totalBytes > capabilities.maxTransferBytes) {
+        throw new Error(
+          `Receiver accepts at most ${capabilities.maxTransferBytes} bytes, but the transfer is ${this.totalBytes} bytes`
+        );
+      }
+
+      for (let fileIndex = 0; fileIndex < this.files.length; fileIndex++) {
+        await this.sendFile(this.files[fileIndex], fileIndex, capabilities, abort.signal);
+      }
+
+      this.throwIfSendAborted(abort.signal);
+
+      this.webrtc.sendJSON({ type: 'transfer_complete' } as TransferCompleteMessage);
+      this.setStatus('completed');
+      this.emit({ type: 'transfer_complete' });
+    } finally {
+      if (this.sendAbort === abort) {
+        this.sendAbort = null;
+      }
     }
+  }
 
-    for (let fileIndex = 0; fileIndex < this.files.length; fileIndex++) {
-      await this.sendFile(this.files[fileIndex], fileIndex, capabilities);
-    }
-
-    this.webrtc.sendJSON({ type: 'transfer_complete' } as TransferCompleteMessage);
-    this.setStatus('completed');
-    this.emit({ type: 'transfer_complete' });
+  /** 送信が中断されていれば例外を投げる。待機を挟むたびに確認する。 */
+  private throwIfSendAborted(signal: AbortSignal): void {
+    if (!signal.aborted) return;
+    const reason = signal.reason;
+    throw reason instanceof Error ? reason : new Error('Transfer stopped');
   }
 
   private async sendFile(
     file: File,
     fileIndex: number,
-    capabilities: ReceiverCapabilities
+    capabilities: ReceiverCapabilities,
+    signal: AbortSignal
   ): Promise<void> {
     const metadata = this.chunkManager.createMetadata(file);
     // 圧縮は双方が対応している場合にのみ使う。受信側が解凍できない環境なら
@@ -376,9 +398,9 @@ export class TransferManager {
       metadata,
       compressed: shouldCompress,
     };
+    // データチャネルは順序保証があり、受信側の処理も直列化されているので、
+    // metadata の後に固定時間待つ必要はない。
     this.webrtc.sendJSON(metadataMsg);
-
-    await new Promise(resolve => setTimeout(resolve, 100));
 
     for await (const chunk of this.chunkManager.split(file)) {
       let data = chunk.data;
@@ -387,13 +409,17 @@ export class TransferManager {
         data = await this.compression.compress(data);
       }
 
+      // 読み込み・圧縮を待っている間にキャンセルや切断が起きている可能性がある。
+      // 壊れた接続に次のチャンクを流し込まないよう、送信前に必ず確認する。
+      this.throwIfSendAborted(signal);
+
       const serialized = ChunkManager.serializeChunk({ ...chunk, data });
-      this.webrtc.send(serialized);
+      // 送信バッファが高水位を下回るまで待ってから積む（固定 sleep ではなく
+      // 実際のドレインに追従させる）。cancel / 切断時は待機ごと reject される。
+      await this.webrtc.sendWithBackpressure(serialized, signal);
 
       this.bytesTransferred += chunk.size;
       this.updateProgress();
-
-      await new Promise(resolve => setTimeout(resolve, 1));
     }
 
     // 受信側の検証が通るまで次のファイルへ進まない。
@@ -428,6 +454,13 @@ export class TransferManager {
    */
   private rejectPendingWaiters(reason: Error): boolean {
     let rejected = false;
+
+    // 送信ループ（バッファ空き待ち・圧縮待ち）を解放する。abort すると
+    // 待機が reject され、ループは sendFile から例外として抜ける。
+    if (this.sendAbort && !this.sendAbort.signal.aborted) {
+      this.sendAbort.abort(reason);
+      rejected = true;
+    }
 
     if (this.capabilityWaiter) {
       const waiter = this.capabilityWaiter;
