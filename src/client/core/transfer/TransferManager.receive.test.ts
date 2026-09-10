@@ -52,6 +52,11 @@ const mocks = vi.hoisted(() => {
     signal: vi.fn(),
     send: vi.fn(),
     sendJSON: vi.fn(),
+    // 送信バックプレッシャは既定で即座に解決する（この scope の関心事ではない）
+    sendWithBackpressure: vi.fn(async (data: ArrayBuffer | Uint8Array | string) => {
+      webrtcConnection.send(data);
+    }),
+    waitForBufferedAmountLow: vi.fn().mockResolvedValue(undefined),
     destroy: vi.fn(),
     on: vi.fn((event: string, handler: EventHandler) => {
       webrtcHandlers.set(event, handler);

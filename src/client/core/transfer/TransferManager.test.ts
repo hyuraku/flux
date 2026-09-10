@@ -20,6 +20,8 @@ const mockWebRTCConnection = {
   signal: vi.fn(),
   send: vi.fn(),
   sendJSON: vi.fn(),
+  sendWithBackpressure: vi.fn().mockResolvedValue(undefined),
+  waitForBufferedAmountLow: vi.fn().mockResolvedValue(undefined),
   destroy: vi.fn(),
   on: vi.fn().mockReturnValue(() => {}),
   isConnected: false,
