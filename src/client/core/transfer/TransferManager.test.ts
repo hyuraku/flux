@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { TransferManager, type TransferStatus } from './TransferManager';
+import type { Chunk, ChunkMetadata } from './ChunkManager';
 
 // SignalingClientのモック
 const mockSignalingClient = {
@@ -27,8 +28,23 @@ const mockWebRTCConnection = {
   isConnected: false,
 };
 
-// ChunkManagerのモック
+// ChunkManagerのモック。
+// 実物（ChunkManager.ts）の公開 API と形・戻り値をそろえる:
+//   setMetadata -> void（不正なメタデータでは throw）
+//   addChunk    -> boolean（不正なチャンクでは throw）
+//   merge       -> Blob / toFile -> File（メタデータ未設定では throw）
+// 入力検証そのものの網羅は、実物を使う ChunkManager.test.ts と
+// TransferManager.receive.test.ts が担当する。ここでは「前提条件を満たさない
+// 呼び出しは例外になる」ことだけ同じにして、成功時の戻り値を実物にそろえる。
+const mockChunkManagerState: { metadata: ChunkMetadata | null } = { metadata: null };
+
 const mockChunkManager = {
+  // 実物では getter。値として同じ名前を生やしておく。
+  currentChunkSize: 16384,
+  receivedCount: 0,
+  totalChunks: 1,
+  progress: 0,
+
   createMetadata: vi.fn().mockReturnValue({
     fileName: 'test.txt',
     fileType: 'text/plain',
@@ -36,7 +52,7 @@ const mockChunkManager = {
     totalChunks: 1,
     chunkSize: 16384,
   }),
-  split: vi.fn().mockImplementation(async function* () {
+  split: vi.fn().mockImplementation(async function* (): AsyncGenerator<Chunk> {
     yield {
       index: 0,
       data: new Uint8Array([1, 2, 3]),
@@ -44,11 +60,36 @@ const mockChunkManager = {
       hash: 'abc123',
     };
   }),
-  reset: vi.fn(),
-  setMetadata: vi.fn(),
-  addChunk: vi.fn().mockReturnValue(true),
+  setMetadata: vi.fn((metadata: ChunkMetadata): void => {
+    if (!metadata || typeof metadata !== 'object') {
+      throw new Error('Invalid metadata: not an object');
+    }
+    mockChunkManagerState.metadata = metadata;
+  }),
+  getMetadata: vi.fn((): ChunkMetadata | null => mockChunkManagerState.metadata),
+  addChunk: vi.fn((): boolean => {
+    if (!mockChunkManagerState.metadata) {
+      throw new Error('Cannot add chunk: no metadata set');
+    }
+    return true;
+  }),
   isComplete: vi.fn().mockReturnValue(false),
-  toFile: vi.fn().mockReturnValue(new File(['test'], 'test.txt')),
+  getMissingChunks: vi.fn().mockReturnValue([]),
+  merge: vi.fn((): Blob => {
+    if (!mockChunkManagerState.metadata) {
+      throw new Error('No metadata set');
+    }
+    return new Blob(['test']);
+  }),
+  toFile: vi.fn((): File => {
+    if (!mockChunkManagerState.metadata) {
+      throw new Error('No metadata set');
+    }
+    return new File(['test'], mockChunkManagerState.metadata.fileName);
+  }),
+  reset: vi.fn((): void => {
+    mockChunkManagerState.metadata = null;
+  }),
 };
 
 // モジュールモック
@@ -60,9 +101,19 @@ vi.mock('../connection/WebRTCConnection', () => ({
   WebRTCConnection: vi.fn().mockImplementation(() => mockWebRTCConnection),
 }));
 
-vi.mock('./ChunkManager', () => ({
-  ChunkManager: vi.fn().mockImplementation(() => mockChunkManager),
-}));
+// インスタンスだけ差し替え、静的メソッドと定数（MAX_TRANSFER_BYTES など）は
+// 実物のまま残す。TransferManager はどちらも使うので、モジュール全体を
+// 置き換えると実物と形が変わってしまう。
+vi.mock('./ChunkManager', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./ChunkManager')>();
+  const MockedChunkManager = vi.fn().mockImplementation(() => mockChunkManager);
+  Object.assign(MockedChunkManager, {
+    serializeChunk: actual.ChunkManager.serializeChunk,
+    deserializeChunk: actual.ChunkManager.deserializeChunk,
+  });
+
+  return { ...actual, ChunkManager: MockedChunkManager };
+});
 
 vi.mock('./CompressionService', () => ({
   CompressionService: vi.fn().mockImplementation(() => ({

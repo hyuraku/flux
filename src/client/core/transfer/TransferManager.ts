@@ -16,6 +16,28 @@ export const CAPABILITY_TIMEOUT_MS = 5000;
 
 export const INCOMPATIBLE_RECEIVER_MESSAGE = 'Receiver is running an incompatible version';
 
+/**
+ * 最後のチャンクを送り終えてから file_ack を待つ時間の基準値。
+ * 受信側は ACK の前に検証・解凍・File 化を行うので、ファイルサイズに比例した
+ * 猶予を上乗せする（下記 ACK_TIMEOUT_MS_PER_BYTE）。
+ */
+export const ACK_TIMEOUT_BASE_MS = 10_000;
+
+/** サイズに比例して伸ばす分。10 MiB あたり 1 秒。 */
+export const ACK_TIMEOUT_MS_PER_BYTE = 1000 / (10 * 1024 * 1024);
+
+/** どれだけ大きなファイルでもこれ以上は待たない。 */
+export const ACK_TIMEOUT_MAX_MS = 120_000;
+
+/** ファイルサイズから ACK 待ちのタイムアウト（ms）を求める。 */
+export function ackTimeoutMs(fileSize: number): number {
+  const size = Number.isFinite(fileSize) && fileSize > 0 ? fileSize : 0;
+  return Math.min(
+    ACK_TIMEOUT_BASE_MS + Math.ceil(size * ACK_TIMEOUT_MS_PER_BYTE),
+    ACK_TIMEOUT_MAX_MS
+  );
+}
+
 export type TransferStatus =
   | 'idle'
   | 'connecting'
@@ -113,6 +135,16 @@ interface PendingWaiter<T> {
   resolve: (value: T) => void;
   reject: (reason: Error) => void;
   timer: ReturnType<typeof setTimeout> | null;
+}
+
+/**
+ * ACK 待ちのハンドル。登録（= ACK を取りこぼさない）とタイムアウト開始を
+ * 分けているのは、大きなファイルの送信時間そのものをタイムアウトに
+ * 含めないため。最後のチャンクを送信バッファに積んでから armTimeout() を呼ぶ。
+ */
+interface AckHandle {
+  received: Promise<void>;
+  armTimeout: () => void;
 }
 
 export class TransferManager {
@@ -490,9 +522,10 @@ export class TransferManager {
       this.compression.shouldCompress(file.size);
 
     // ACK は最後のチャンクの直後に届き得るので、送信前に待機を登録しておく。
-    const ackReceived = this.waitForAck(fileIndex);
+    // タイムアウトは全チャンクを積み終えてから開始する（下の armTimeout）。
+    const ack = this.waitForAck(fileIndex, file.name, file.size);
     // 送信中に reject されても unhandled rejection にしない（下で await する）。
-    ackReceived.catch(() => {});
+    ack.received.catch(() => {});
 
     const metadataMsg: FileMetadataMessage = {
       type: 'file_metadata',
@@ -524,8 +557,12 @@ export class TransferManager {
       this.updateProgress();
     }
 
+    // 全チャンクを送信バッファに渡し終えた。ここから受信側の検証・解凍・
+    // File 化にかかる時間を見込んでタイムアウトを計り始める。
+    ack.armTimeout();
+
     // 受信側の検証が通るまで次のファイルへ進まない。
-    await ackReceived;
+    await ack.received;
   }
 
   private waitForCapabilities(): Promise<ReceiverCapabilities> {
@@ -543,10 +580,34 @@ export class TransferManager {
     });
   }
 
-  private waitForAck(fileIndex: number): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      this.ackWaiter = { fileIndex, resolve, reject, timer: null };
+  /**
+   * file_ack を待つ。タイムアウトは armTimeout() が呼ばれてから計り始める
+   * （登録時から計ると、大きなファイルの送信時間だけで期限切れになる）。
+   */
+  private waitForAck(fileIndex: number, fileName: string, fileSize: number): AckHandle {
+    let armTimeout = (): void => {};
+
+    const received = new Promise<void>((resolve, reject) => {
+      const waiter: PendingWaiter<void> & { fileIndex: number } = {
+        fileIndex,
+        resolve,
+        reject,
+        timer: null,
+      };
+      this.ackWaiter = waiter;
+
+      armTimeout = (): void => {
+        // すでに ACK が届いた / 解放された、あるいは二重に呼ばれた場合は何もしない。
+        if (this.ackWaiter !== waiter || waiter.timer !== null) return;
+
+        waiter.timer = setTimeout(() => {
+          this.ackWaiter = null;
+          reject(new Error(`Receiver did not acknowledge ${fileName} in time`));
+        }, ackTimeoutMs(fileSize));
+      };
     });
+
+    return { received, armTimeout };
   }
 
   /**
