@@ -137,6 +137,10 @@ export class TransferManager {
   private eventHandlers: Map<TransferEventType, Set<TransferEventHandler>> = new Map();
   private cleanupFunctions: (() => void)[] = [];
   private webrtcCreated = false;
+  /** データチャネルが開いているか。シグナリング切断の扱いをこれで切り替える。 */
+  private webrtcConnected = false;
+  /** 転送開始（送信ループ / 能力通知）を 1 回に限定するためのフラグ。 */
+  private transferStarted = false;
   private isCurrentFileCompressed = false;
 
   // --- 送信側: 能力交換と ACK 待ち ---
@@ -205,10 +209,14 @@ export class TransferManager {
     const code = generateCode();
     this._roomId = code;
 
-    await this.signaling.connect(code);
-    this.setupSignalingHandlers();
-
-    this.signaling.generateCode();
+    try {
+      await this.signaling.connect(code);
+      this.setupSignalingHandlers();
+      this.signaling.generateCode();
+    } catch (error) {
+      this.failInitialization(error, 'Could not start receiving. Check your connection and try again.');
+      throw error;
+    }
 
     this.setStatus('waiting');
     return code;
@@ -222,10 +230,30 @@ export class TransferManager {
 
     this.setStatus('connecting');
 
-    await this.signaling.connect(code);
-    this.setupSignalingHandlers();
+    try {
+      await this.signaling.connect(code);
+      this.setupSignalingHandlers();
+      this.signaling.joinRoom(code, 'sender');
+    } catch (error) {
+      this.failInitialization(error, 'Could not start the transfer. Check your connection and try again.');
+      throw error;
+    }
+  }
 
-    this.signaling.joinRoom(code, 'sender');
+  /**
+   * 初期化に失敗したときの後始末。connecting のまま止まって UI が
+   * 「Connecting...」を出し続けるのを防ぐため、必ず error を表に出す。
+   * cleanup() はイベントハンドラも消すので、通知を済ませてから呼ぶ。
+   */
+  private failInitialization(error: unknown, fallbackMessage: string): void {
+    const message =
+      error instanceof Error && error.message.length > 0 ? error.message : fallbackMessage;
+
+    this.rejectPendingWaiters(new Error(message));
+    this.setStatus('error');
+    this.emit({ type: 'error', data: { message } });
+    // cleanup() は status を触らないので error のまま残る。
+    this.cleanup();
   }
 
   private setupSignalingHandlers(): void {
@@ -245,26 +273,30 @@ export class TransferManager {
     });
 
     const cleanup2 = this.signaling.on('webrtc_offer', (event) => {
-      if (this.role === 'sender') {
-        if (event.data.fromPeerId) {
-          this.targetPeerId = event.data.fromPeerId;
-        }
-        if (!this.webrtcCreated) {
-          this.webrtc.create({ initiator: false });
-          this.setupWebRTCHandlers();
-          this.webrtcCreated = true;
-        }
-        this.webrtc.signal(JSON.parse(event.data.sdp));
+      if (this.role !== 'sender') return;
+      if (this.isFromUnknownPeer(event.data?.fromPeerId)) return;
+
+      if (event.data.fromPeerId) {
+        this.targetPeerId = event.data.fromPeerId;
       }
+      if (!this.webrtcCreated) {
+        this.webrtc.create({ initiator: false });
+        this.setupWebRTCHandlers();
+        this.webrtcCreated = true;
+      }
+      this.webrtc.signal(JSON.parse(event.data.sdp));
     });
 
     const cleanup3 = this.signaling.on('webrtc_answer', (event) => {
-      if (this.role === 'receiver') {
-        this.webrtc.signal(JSON.parse(event.data.sdp));
-      }
+      if (this.role !== 'receiver') return;
+      if (this.isFromUnknownPeer(event.data?.fromPeerId)) return;
+
+      this.webrtc.signal(JSON.parse(event.data.sdp));
     });
 
     const cleanup4 = this.signaling.on('ice_candidate', (event) => {
+      if (this.isFromUnknownPeer(event.data?.fromPeerId)) return;
+
       if (!this.targetPeerId && event.data.fromPeerId) {
         this.targetPeerId = event.data.fromPeerId;
       }
@@ -272,12 +304,74 @@ export class TransferManager {
     });
 
     const cleanup5 = this.signaling.on('error', (event) => {
-      this.rejectPendingWaiters(new Error('Signaling error'));
-      this.setStatus('error');
-      this.emit({ type: 'error', data: event.data });
+      // サーバからの PEER_DISCONNECTED もここに来る。相手の「シグナリング」が
+      // 落ちただけなので、データチャネルが開いた後なら転送には関係ない。
+      this.handleSignalingFailure('Signaling error', event.data);
     });
 
-    this.cleanupFunctions.push(cleanup1, cleanup2, cleanup3, cleanup4, cleanup5);
+    const cleanup6 = this.signaling.on('disconnected', () => {
+      this.handleSignalingFailure(
+        'Lost the connection to the signaling server before pairing finished. Please try again.'
+      );
+    });
+
+    const cleanup7 = this.signaling.on('reconnected', () => {
+      // 再接続しても部屋への再登録はしない（理由は handleSignalingFailure 参照）。
+      console.warn('[flux] Signaling reconnected, but the room registration is gone.');
+    });
+
+    this.cleanupFunctions.push(
+      cleanup1,
+      cleanup2,
+      cleanup3,
+      cleanup4,
+      cleanup5,
+      cleanup6,
+      cleanup7
+    );
+  }
+
+  /**
+   * 相手として確定済みの peer 以外から届いたシグナリングは無視する。
+   * サーバ側でも中継先を検証しているが、クライアントでも同じ前提を確認する。
+   * 不正扱いでエラーにはせず、単に捨てる。
+   */
+  private isFromUnknownPeer(fromPeerId: unknown): boolean {
+    return (
+      typeof fromPeerId === 'string' &&
+      fromPeerId.length > 0 &&
+      this.targetPeerId !== null &&
+      fromPeerId !== this.targetPeerId
+    );
+  }
+
+  /**
+   * シグナリングの切断・エラーの扱いはフェーズで変わる。
+   *
+   * - データチャネルが開く前（ペアリング中）: 致命的として扱う。サーバは
+   *   onClose で peer を削除し相手にも PEER_DISCONNECTED を送っているので、
+   *   同じ部屋に戻る手段がない。receiver は generate_code で新しいコードしか
+   *   取れず、sender が join_room し直しても receiver 側は既に
+   *   RTCPeerConnection を作っている（webrtcCreated ガード）ため 2 度目の
+   *   offer を作らず、古い ICE のまま噛み合わない。そのため再登録は試みず、
+   *   ペアリング失敗としてユーザーにやり直してもらう。
+   * - データチャネルが開いた後: 転送自体はシグナリングを使わない。相手の
+   *   シグナリングが落ちて届く PEER_DISCONNECTED も含めて無視し、転送の
+   *   成否は WebRTC 側の disconnected / error だけで決める。
+   *   （ソケットを能動的に閉じないのは、接続確立後も trickle ICE が
+   *   続く可能性があるため。）
+   */
+  private handleSignalingFailure(fallbackMessage: string, data?: { message?: string }): void {
+    if (this.webrtcConnected) {
+      console.warn('[flux] Ignoring signaling failure after the data channel opened.');
+      return;
+    }
+
+    const message =
+      typeof data?.message === 'string' && data.message.length > 0 ? data.message : fallbackMessage;
+
+    this.rejectPendingWaiters(new Error(message));
+    this.failTransfer(message);
   }
 
   private setupWebRTCHandlers(): void {
@@ -300,6 +394,12 @@ export class TransferManager {
     // key exchange is performed. Once the data channel is open we can
     // transfer immediately.
     const cleanup2 = this.webrtc.on('connected', () => {
+      this.webrtcConnected = true;
+
+      // connected が複数回届いても転送の開始は 1 度だけ。
+      if (this.transferStarted) return;
+      this.transferStarted = true;
+
       if (this.role === 'sender') {
         this.startSending().catch((err: unknown) => {
           this.failTransfer(err instanceof Error ? err.message : 'Transfer failed');
@@ -315,12 +415,14 @@ export class TransferManager {
     });
 
     const cleanup4 = this.webrtc.on('error', (event) => {
+      this.webrtcConnected = false;
       this.rejectPendingWaiters(new Error('Connection error'));
       this.setStatus('error');
       this.emit({ type: 'error', data: event.data });
     });
 
     const cleanup5 = this.webrtc.on('disconnected', () => {
+      this.webrtcConnected = false;
       this.rejectPendingWaiters(new Error('Connection lost'));
       if (this.status !== 'completed' && this.status !== 'cancelled') {
         this.setStatus('error');
@@ -808,6 +910,9 @@ export class TransferManager {
     this.chunkManager.reset();
     this.eventHandlers.clear();
     this.webrtcCreated = false;
+    this.webrtcConnected = false;
+    this.transferStarted = false;
+    this.targetPeerId = null;
   }
 
   getReceivedFile(): File | null {
