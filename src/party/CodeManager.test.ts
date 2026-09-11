@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { CodeManager } from './CodeManager';
+import {
+  CodeManager,
+  DEFAULT_MAX_TRACKED_KEYS,
+  DEFAULT_SWEEP_INTERVAL_MS,
+  type RateLimitConfig,
+} from './CodeManager';
 
 describe('CodeManager', () => {
   let codeManager: CodeManager;
@@ -227,6 +232,166 @@ describe('CodeManager', () => {
       codeManager.recordFailedAttempt(ip);
 
       expect(codeManager.isLockedOut(ip)).toBe(true);
+    });
+  });
+
+  describe('レート制限 state の上限', () => {
+    const BOUNDED: RateLimitConfig = {
+      windowMs: 60 * 1000,
+      maxAttempts: 30,
+      lockoutThreshold: 3,
+      lockoutMs: 5 * 60 * 1000,
+      failureWindowMs: 5 * 60 * 1000,
+      maxTrackedKeys: 5,
+      sweepIntervalMs: 60 * 1000,
+    };
+
+    it('既定値が入る（設定を省略しても上限は効く）', () => {
+      const limiter = new CodeManager({
+        windowMs: 60 * 1000,
+        maxAttempts: 30,
+        lockoutThreshold: 3,
+        lockoutMs: 5 * 60 * 1000,
+        failureWindowMs: null,
+      });
+
+      limiter.recordAttempt('198.51.100.1');
+      expect(limiter.getTrackedKeyCount()).toBe(1);
+      expect(DEFAULT_MAX_TRACKED_KEYS).toBe(10_000);
+      expect(DEFAULT_SWEEP_INTERVAL_MS).toBe(60 * 1000);
+    });
+
+    it('期限切れのキーは掃除される', () => {
+      const limiter = new CodeManager(BOUNDED);
+      const now = Date.now();
+      vi.setSystemTime(now);
+
+      limiter.recordAttempt('198.51.100.1');
+      limiter.recordFailedAttempt('198.51.100.2');
+      expect(limiter.getTrackedKeyCount()).toBe(2);
+
+      // ウィンドウも失敗の保持期間も過ぎた時点で別のキーを触る
+      vi.setSystemTime(now + 10 * 60 * 1000);
+      limiter.recordAttempt('198.51.100.3');
+
+      expect(limiter.getTrackedKeyCount()).toBe(1);
+    });
+
+    it('掃除は sweepIntervalMs ごとにしか走らない', () => {
+      const limiter = new CodeManager({
+        ...BOUNDED,
+        sweepIntervalMs: 10 * 60 * 1000,
+      });
+      const now = Date.now();
+      vi.setSystemTime(now);
+
+      limiter.recordAttempt('198.51.100.1');
+
+      // ウィンドウ（1分）は過ぎたが掃除間隔（10分）には達していないので残る
+      vi.setSystemTime(now + 5 * 60 * 1000);
+      limiter.recordAttempt('198.51.100.2');
+      expect(limiter.getTrackedKeyCount()).toBe(2);
+
+      // 掃除間隔を過ぎると期限切れの2件がまとめて消える
+      vi.setSystemTime(now + 11 * 60 * 1000);
+      limiter.recordAttempt('198.51.100.3');
+      expect(limiter.getTrackedKeyCount()).toBe(1);
+    });
+
+    it('掃除してもロックアウト中のキーは残る', () => {
+      const limiter = new CodeManager(BOUNDED);
+      const now = Date.now();
+      vi.setSystemTime(now);
+
+      const locked = '198.51.100.9';
+      for (let i = 0; i < 3; i++) {
+        limiter.recordFailedAttempt(locked);
+      }
+      expect(limiter.isLockedOut(locked)).toBe(true);
+
+      // 失敗の保持期間（5分）は過ぎるがロックアウト（5分）はまだ有効
+      vi.setSystemTime(now + 5 * 60 * 1000 - 1);
+      limiter.recordAttempt('198.51.100.10');
+
+      expect(limiter.getTrackedKeyCount()).toBe(2);
+      expect(limiter.isLockedOut(locked)).toBe(true);
+
+      // ロックアウトが切れれば掃除対象になる
+      vi.setSystemTime(now + 20 * 60 * 1000);
+      limiter.recordAttempt('198.51.100.11');
+      expect(limiter.getTrackedKeyCount()).toBe(1);
+    });
+
+    it('キー数の上限を超えない', () => {
+      const limiter = new CodeManager(BOUNDED);
+      const now = Date.now();
+      vi.setSystemTime(now);
+
+      for (let i = 0; i < 50; i++) {
+        limiter.recordAttempt(`198.51.100.${i}`);
+      }
+
+      expect(limiter.getTrackedKeyCount()).toBe(5);
+    });
+
+    it('上限超過時は古い非ロックのキーから追い出す', () => {
+      const limiter = new CodeManager(BOUNDED);
+      const now = Date.now();
+      vi.setSystemTime(now);
+
+      // 先にロックアウトされたキーを作る
+      const locked = '198.51.100.99';
+      for (let i = 0; i < 3; i++) {
+        limiter.recordFailedAttempt(locked);
+      }
+      expect(limiter.isLockedOut(locked)).toBe(true);
+
+      // 上限（5）を超えるまで非ロックのキーを増やす。
+      // 掃除が走らないよう同じ時刻のままにする。
+      for (let i = 0; i < 20; i++) {
+        limiter.recordAttempt(`198.51.100.${i}`);
+      }
+
+      expect(limiter.getTrackedKeyCount()).toBe(5);
+      // ロック中のキーは非ロックのキーより後に追い出される
+      expect(limiter.isLockedOut(locked)).toBe(true);
+    });
+
+    it('上限が埋まりきった場合は解除の近いロックから追い出す', () => {
+      // 1回の失敗で即ロックする設定にして、全キーがロック中の状態を作る
+      const limiter = new CodeManager({
+        ...BOUNDED,
+        lockoutThreshold: 1,
+        maxTrackedKeys: 3,
+      });
+      const now = Date.now();
+
+      // 解除時刻が異なる4つのロックを作る
+      const keys = ['a', 'b', 'c', 'd'];
+      keys.forEach((key, index) => {
+        vi.setSystemTime(now + index);
+        limiter.recordFailedAttempt(key);
+      });
+
+      expect(limiter.getTrackedKeyCount()).toBe(3);
+      // 最初にロックされた（＝最も早く解除される）キーが落ちる
+      expect(limiter.isLockedOut('a')).toBe(false);
+      expect(limiter.isLockedOut('b')).toBe(true);
+      expect(limiter.isLockedOut('c')).toBe(true);
+      expect(limiter.isLockedOut('d')).toBe(true);
+    });
+
+    it('ウィンドウ内のキーの判定は上限処理の影響を受けない', () => {
+      const limiter = new CodeManager(BOUNDED);
+      const now = Date.now();
+      vi.setSystemTime(now);
+
+      const ip = '198.51.100.200';
+      for (let i = 0; i < 30; i++) {
+        limiter.recordAttempt(ip);
+      }
+
+      expect(limiter.checkRateLimit(ip)).toBe(false);
     });
   });
 });
