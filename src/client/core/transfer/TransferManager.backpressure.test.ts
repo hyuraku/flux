@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { TransferManager, PROTOCOL_VERSION, type TransferStatus } from './TransferManager';
+import {
+  TransferManager,
+  PROTOCOL_VERSION,
+  ACK_TIMEOUT_MAX_MS,
+  ackTimeoutMs,
+  type TransferStatus,
+} from './TransferManager';
 import { MAX_TRANSFER_BYTES } from './ChunkManager';
 import { BUFFERED_AMOUNT_HIGH_WATERMARK } from '../connection/WebRTCConnection';
 import { FakeDataChannel, createFakePeerConnection } from '../../test/fakeDataChannel';
@@ -261,5 +267,143 @@ describe('metadata 送信後の固定待ち', () => {
 
     expect(sentJson().map(m => m.type)).toContain('file_metadata');
     expect(sentChunks()).toHaveLength(1);
+  });
+});
+
+describe('ファイル ACK 待ちのタイムアウト', () => {
+  const SMALL_SIZE = 1024;
+
+  let manager: TransferManager;
+  let statuses: TransferStatus[];
+  let errors: { message?: string }[];
+
+  /** フェイクタイマー環境でイベントループを 1 周させる */
+  async function fakeTick(): Promise<void> {
+    await vi.advanceTimersByTimeAsync(1);
+  }
+
+  /** 送信ループがバッファ空き待ちに入るまで進める（フェイクタイマー版） */
+  async function advanceUntilBlocked(): Promise<void> {
+    for (let i = 0; i < 200 && channel.listenerCount('bufferedamountlow') === 0; i++) {
+      await fakeTick();
+    }
+    if (channel.listenerCount('bufferedamountlow') === 0) {
+      throw new Error('送信ループがバッファ空き待ちに入らなかった');
+    }
+  }
+
+  /** 1 チャンクのファイルを送り切り、ACK 待ちに入った状態にする */
+  async function sendSmallFileAndWaitForAck(fileName: string): Promise<void> {
+    const file = new File([new Uint8Array(SMALL_SIZE)], fileName);
+
+    await connectAsSender(manager, [file]);
+    channel.receive(capabilitiesMessage());
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(sentChunks()).toHaveLength(1);
+    expect(manager.currentStatus).toBe('transferring');
+  }
+
+  beforeEach(() => {
+    mocks.signalingHandlers.clear();
+    vi.clearAllMocks();
+    mocks.signalingClient.connect.mockResolvedValue(undefined);
+    vi.useFakeTimers();
+
+    channel = new FakeDataChannel();
+    stubPeerConnection();
+
+    manager = new TransferManager({ enableCompression: false, chunkSize: CHUNK_SIZE });
+    statuses = [];
+    errors = [];
+    manager.on('status_change', event => statuses.push(event.data.status));
+    manager.on('error', event => errors.push(event.data as { message?: string }));
+  });
+
+  afterEach(() => {
+    manager.cleanup();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('ACK が時間内に届けばエラーにならず、タイマーも残らない', async () => {
+    await sendSmallFileAndWaitForAck('small.bin');
+
+    channel.receive(ackMessage(0, 'small.bin', SMALL_SIZE));
+    await fakeTick();
+
+    expect(manager.currentStatus).toBe('completed');
+    expect(sentJson().map(m => m.type)).toContain('transfer_complete');
+
+    // タイマーが残っていれば、ここでタイムアウトが発火してしまう
+    await vi.advanceTimersByTimeAsync(ACK_TIMEOUT_MAX_MS * 2);
+
+    expect(errors).toEqual([]);
+    expect(manager.currentStatus).toBe('completed');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('ACK が届かないとタイムアウトして転送がエラーになる', async () => {
+    await sendSmallFileAndWaitForAck('small.bin');
+
+    // 期限前はまだ待っている（送信に要した時間の分だけ余裕を見る）
+    await vi.advanceTimersByTimeAsync(ackTimeoutMs(SMALL_SIZE) - 1000);
+    expect(manager.currentStatus).toBe('transferring');
+
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(manager.currentStatus).toBe('error');
+    expect(errors).toContainEqual({
+      message: 'Receiver did not acknowledge small.bin in time',
+    });
+    expect(sentJson().map(m => m.type)).not.toContain('transfer_complete');
+  });
+
+  it('最後のチャンクを送り終えるまでタイムアウトは始まらない', async () => {
+    const file = new File([new Uint8Array(FILE_SIZE)], 'big.bin');
+
+    await connectAsSender(manager, [file]);
+    channel.receive(capabilitiesMessage());
+
+    // ドレインしないので高水位で詰まる = まだ送信し終えていない
+    await advanceUntilBlocked();
+    expect(sentChunks().length).toBeLessThan(TOTAL_CHUNKS);
+
+    // 送信途中であればどれだけ時間が経ってもタイムアウトしない
+    await vi.advanceTimersByTimeAsync(ACK_TIMEOUT_MAX_MS * 2);
+
+    expect(errors).toEqual([]);
+    expect(manager.currentStatus).toBe('transferring');
+    expect(sentChunks().length).toBeLessThan(TOTAL_CHUNKS);
+
+    // ドレインさせて送り切ると、そこからタイムアウトが計られる
+    for (let i = 0; i < 2000 && sentChunks().length < TOTAL_CHUNKS; i++) {
+      channel.drain(DRAIN_PER_TICK);
+      await fakeTick();
+    }
+    expect(sentChunks()).toHaveLength(TOTAL_CHUNKS);
+    expect(manager.currentStatus).toBe('transferring');
+
+    await vi.advanceTimersByTimeAsync(ackTimeoutMs(FILE_SIZE) + 1);
+
+    expect(manager.currentStatus).toBe('error');
+    expect(errors).toContainEqual({
+      message: 'Receiver did not acknowledge big.bin in time',
+    });
+  });
+
+  it('ACK 待ちの最中に cancel するとタイマーも解放される', async () => {
+    await sendSmallFileAndWaitForAck('small.bin');
+
+    manager.cancel();
+    expect(manager.currentStatus).toBe('cancelled');
+
+    await vi.advanceTimersByTimeAsync(ACK_TIMEOUT_MAX_MS * 2);
+
+    expect(manager.currentStatus).toBe('cancelled');
+    expect(statuses).not.toContain('error');
+    expect(errors).toEqual([]);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
