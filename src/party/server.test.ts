@@ -674,6 +674,31 @@ describe('TransferServer', () => {
 
       expect(lastMessage(sender)).toMatchObject({ type: 'connection_locked' });
     });
+
+    it('lockIdは推測できないようCSPRNG由来のUUIDで発行する', async () => {
+      const first = await createPairedRoom();
+      await first.send(first.sender, {
+        type: 'lock_connection',
+        peerId: first.sender.id,
+      });
+      const second = await createPairedRoom();
+      await second.send(second.sender, {
+        type: 'lock_connection',
+        peerId: second.sender.id,
+      });
+
+      const lockIds = [first, second].map(
+        ({ sender }) => receivedOfType(sender, 'connection_locked')[0].lockId
+      );
+
+      for (const lockId of lockIds) {
+        // 時刻や Math.random() を混ぜた推測可能な形式ではないこと
+        expect(lockId).toMatch(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+        );
+      }
+      expect(lockIds[0]).not.toBe(lockIds[1]);
+    });
   });
 
   describe('reconnect_with_lock', () => {

@@ -28,6 +28,10 @@ const codeManager = new CodeManager();
  * 転送ルームのローカルな Map ではルームを跨いだコード列挙を止められない。
  * 全ルームからの判定を1つの予約ルームに集約することで、
  * 接続を張り直しても・ルームを変えても同じ接続元は同じ枠を消費する。
+ *
+ * 集約する以上このインスタンスには全ルーム分のキーが集まるので、
+ * state の上限・掃除は CodeManager 側で面倒を見ている
+ * （DEFAULT_MAX_TRACKED_KEYS / DEFAULT_SWEEP_INTERVAL_MS）。
  */
 const crossRoomLimiter = new CodeManager(CROSS_ROOM_RATE_LIMIT);
 
@@ -597,7 +601,12 @@ export default class TransferServer implements Party.Server {
       return;
     }
 
-    const lockId = `lock_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    // ロックIDは reconnect_with_lock でそのまま接続の引き継ぎに使われるので、
+    // 推測されると他人の接続を乗っ取られる。Math.random() や時刻を混ぜた文字列は
+    // 予測可能なので、CSPRNG 由来の UUID を使う
+    // （PartyKit = Cloudflare Workers / Node 19+ の両方で利用できる）。
+    // 値をパースしている箇所は無いので接頭辞は付けない。
+    const lockId = crypto.randomUUID();
     const expiresAt = Date.now() + 5 * 60 * 1000; // 5分後
 
     this.locks.set(lockId, {
