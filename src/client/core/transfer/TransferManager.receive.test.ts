@@ -588,3 +588,92 @@ describe('送信側の能力交換と ACK 待ち', () => {
     expect(sentTypes()).not.toContain('transfer_complete');
   });
 });
+
+describe('fromPeerId の検証', () => {
+  let manager: TransferManager;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.signalingHandlers.clear();
+    mocks.webrtcHandlers.clear();
+    mocks.compression.isSupported = true;
+    mocks.compression.shouldCompress = false;
+
+    manager = new TransferManager();
+  });
+
+  afterEach(() => {
+    manager.cleanup();
+  });
+
+  /** peer_joined で相手を確定させた受信側を作る */
+  async function receiverPairedWith(peerId: string): Promise<void> {
+    await manager.initializeAsReceiver();
+    mocks.signalingHandlers.get('peer_joined')?.({
+      type: 'peer_joined',
+      data: { role: 'sender', peerId },
+    });
+  }
+
+  it('受信側: 確定済みの相手からの answer は処理する', async () => {
+    await receiverPairedWith('peer-1');
+
+    mocks.signalingHandlers.get('webrtc_answer')?.({
+      type: 'webrtc_answer',
+      data: { fromPeerId: 'peer-1', sdp: JSON.stringify({ type: 'answer' }) },
+    });
+
+    expect(mocks.webrtcConnection.signal).toHaveBeenCalledTimes(1);
+  });
+
+  it('受信側: 別の fromPeerId からの answer は無視する', async () => {
+    await receiverPairedWith('peer-1');
+
+    mocks.signalingHandlers.get('webrtc_answer')?.({
+      type: 'webrtc_answer',
+      data: { fromPeerId: 'intruder', sdp: JSON.stringify({ type: 'answer' }) },
+    });
+
+    expect(mocks.webrtcConnection.signal).not.toHaveBeenCalled();
+  });
+
+  it('受信側: 別の fromPeerId からの ICE candidate は無視する', async () => {
+    await receiverPairedWith('peer-1');
+
+    mocks.signalingHandlers.get('ice_candidate')?.({
+      type: 'ice_candidate',
+      data: { fromPeerId: 'intruder', candidate: JSON.stringify({ candidate: 'a' }) },
+    });
+
+    expect(mocks.webrtcConnection.signal).not.toHaveBeenCalled();
+  });
+
+  it('送信側: 最初の offer で相手を確定し、別の fromPeerId の offer は無視する', async () => {
+    await manager.initializeAsSender('123456', [new File(['abc'], 'a.txt')]);
+
+    const offerHandler = mocks.signalingHandlers.get('webrtc_offer');
+    offerHandler?.({
+      type: 'webrtc_offer',
+      data: { fromPeerId: 'peer-1', sdp: JSON.stringify({ type: 'offer' }) },
+    });
+    expect(mocks.webrtcConnection.signal).toHaveBeenCalledTimes(1);
+
+    offerHandler?.({
+      type: 'webrtc_offer',
+      data: { fromPeerId: 'intruder', sdp: JSON.stringify({ type: 'offer' }) },
+    });
+
+    expect(mocks.webrtcConnection.signal).toHaveBeenCalledTimes(1);
+  });
+
+  it('fromPeerId がない場合は従来どおり処理する（後方互換）', async () => {
+    await receiverPairedWith('peer-1');
+
+    mocks.signalingHandlers.get('webrtc_answer')?.({
+      type: 'webrtc_answer',
+      data: { sdp: JSON.stringify({ type: 'answer' }) },
+    });
+
+    expect(mocks.webrtcConnection.signal).toHaveBeenCalledTimes(1);
+  });
+});

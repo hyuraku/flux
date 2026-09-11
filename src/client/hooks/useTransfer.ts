@@ -66,23 +66,42 @@ export function useTransfer(options: TransferOptions = {}): UseTransferReturn {
     return manager;
   }, [options]);
 
+  /**
+   * 初期化失敗を必ず UI に出す。TransferManager 側も error イベントを出すので
+   * 二重に呼ばれ得るが、同じ値を入れるだけなので冪等。呼び出し側が await して
+   * いる場合のために再スローする。
+   */
+  const failInit = useCallback((err: unknown, fallback: string): never => {
+    setStatus('error');
+    setError(err instanceof Error && err.message.length > 0 ? err.message : fallback);
+    throw err;
+  }, []);
+
   const initializeAsReceiver = useCallback(async (): Promise<string> => {
     setError(null);
     setReceivedFiles([]);
 
     const manager = createManager();
-    const generatedCode = await manager.initializeAsReceiver();
-    setCode(generatedCode);
-    return generatedCode;
-  }, [createManager]);
+    try {
+      const generatedCode = await manager.initializeAsReceiver();
+      setCode(generatedCode);
+      return generatedCode;
+    } catch (err) {
+      return failInit(err, 'Could not start receiving.');
+    }
+  }, [createManager, failInit]);
 
   const initializeAsSender = useCallback(async (targetCode: string, files: File[]): Promise<void> => {
     setError(null);
     setCode(targetCode);
 
     const manager = createManager();
-    await manager.initializeAsSender(targetCode, files);
-  }, [createManager]);
+    try {
+      await manager.initializeAsSender(targetCode, files);
+    } catch (err) {
+      failInit(err, 'Could not start the transfer.');
+    }
+  }, [createManager, failInit]);
 
   const cancel = useCallback(() => {
     managerRef.current?.cancel();

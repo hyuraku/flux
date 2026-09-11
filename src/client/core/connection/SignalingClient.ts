@@ -3,6 +3,7 @@ import type { SignalingMessage } from '../../../party/types';
 
 export type SignalingEventType =
   | 'connected'
+  | 'reconnected'
   | 'disconnected'
   | 'code_generated'
   | 'peer_joined'
@@ -48,13 +49,27 @@ function resolvePartyKitHost(): string {
   );
 }
 
+/**
+ * 再接続は PartySocket（ReconnectingWebSocket）だけに任せる。以前はここでも
+ * setTimeout で connect() を張り直していたため、PartySocket 自身の再接続と
+ * 二重になり、古いソケットへの参照を失って disconnect() でも閉じられない
+ * 状態になっていた。所有者を 1 つにし、上限付きのリトライだけを設定する。
+ */
+const RECONNECT_OPTIONS = {
+  maxRetries: 3,
+  minReconnectionDelay: 1000,
+  maxReconnectionDelay: 8000,
+} as const;
+
 export class SignalingClient {
   private socket: PartySocket | null = null;
   private eventHandlers: Map<SignalingEventType, Set<SignalingEventHandler>> = new Map();
   private roomId: string | null = null;
   private peerId: string | null = null;
-  private reconnectAttempts = 0;
-  private maxReconnectAttempts = 3;
+  /** 現在のソケットが一度でも open したか（2 回目以降の open は reconnected） */
+  private hasOpened = false;
+  /** 決着前の connect()。決着後は null なので二重に resolve / reject しない。 */
+  private pendingConnect: { resolve: () => void; reject: (error: Error) => void } | null = null;
   private host: string;
 
   constructor(host?: string) {
@@ -73,39 +88,97 @@ export class SignalingClient {
     return this.peerId;
   }
 
+  /**
+   * シグナリングサーバへ接続する。返す Promise はちょうど 1 回だけ決着する:
+   * 最初の open で resolve、初回 open 前の失敗（error / close）で reject。
+   * 決着後の close / error はイベントを流すだけで Promise には触れない。
+   */
   async connect(roomId: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      try {
-        this.roomId = roomId;
+    // 張り直す前に必ず閉じる。閉じずに上書きすると古いソケットが再接続を
+    // 続けたまま参照だけ失われる。
+    this.closeSocket();
 
-        this.socket = new PartySocket({
-          host: this.host,
-          room: roomId,
-        });
+    return new Promise<void>((resolve, reject) => {
+      this.roomId = roomId;
 
-        this.socket.onopen = () => {
-          this.reconnectAttempts = 0;
-          this.emit({ type: 'connected' });
-          resolve();
-        };
+      const socket = new PartySocket({
+        host: this.host,
+        room: roomId,
+        ...RECONNECT_OPTIONS,
+      });
+      this.socket = socket;
+      // 決着させる手段を保持しておく。決着済みなら null。
+      this.pendingConnect = { resolve, reject };
 
-        this.socket.onclose = () => {
+      /** このソケットが現役かどうか。disconnect 後の残響イベントは捨てる。 */
+      const isCurrent = () => this.socket === socket;
+
+      /** 初回 open 前の失敗。リトライを続けさせず、ソケットも残さない。 */
+      const failBeforeOpen = (message: string) => {
+        const pending = this.pendingConnect;
+        this.pendingConnect = null;
+        this.closeSocket();
+        pending?.reject(new Error(message));
+      };
+
+      socket.onopen = () => {
+        if (!isCurrent()) return;
+        const isFirstOpen = !this.hasOpened;
+        this.hasOpened = true;
+        this.emit({ type: isFirstOpen ? 'connected' : 'reconnected' });
+
+        const pending = this.pendingConnect;
+        this.pendingConnect = null;
+        pending?.resolve();
+      };
+
+      socket.onclose = () => {
+        if (!isCurrent()) return;
+        if (this.hasOpened) {
           this.emit({ type: 'disconnected' });
-          this.handleReconnect();
-        };
+          return;
+        }
+        // 一度も open していないまま閉じた＝接続失敗。
+        failBeforeOpen('Signaling connection closed before it opened');
+        this.emit({ type: 'disconnected' });
+      };
 
-        this.socket.onerror = (error) => {
-          this.emit({ type: 'error', data: { message: 'Connection error', error } });
-          reject(error);
-        };
+      socket.onerror = (error) => {
+        if (!isCurrent()) return;
+        if (!this.hasOpened) {
+          failBeforeOpen('Could not connect to the signaling server');
+        }
+        this.emit({ type: 'error', data: { message: 'Connection error', error } });
+      };
 
-        this.socket.onmessage = (event) => {
-          this.handleMessage(event.data);
-        };
-      } catch (error) {
-        reject(error);
-      }
+      socket.onmessage = (event) => {
+        if (!isCurrent()) return;
+        this.handleMessage(event.data);
+      };
     });
+  }
+
+  /**
+   * 現在のソケットを閉じて参照を捨てる。close() は PartySocket の
+   * 自動再接続も止める（内部の _shouldReconnect が false になる）。
+   * 接続待ちの Promise が残っていれば、宙吊りにせず reject する。
+   */
+  private closeSocket(): void {
+    const socket = this.socket;
+    const pending = this.pendingConnect;
+    this.socket = null;
+    this.pendingConnect = null;
+    this.hasOpened = false;
+
+    if (socket) {
+      socket.onopen = null;
+      socket.onclose = null;
+      socket.onerror = null;
+      socket.onmessage = null;
+      socket.close();
+    }
+
+    pending?.reject(new Error('Signaling connection was closed'));
   }
 
   private handleMessage(data: string) {
@@ -143,19 +216,6 @@ export class SignalingClient {
       }
     } catch (error) {
       console.error('Failed to parse signaling message:', error);
-    }
-  }
-
-  private handleReconnect() {
-    if (this.reconnectAttempts < this.maxReconnectAttempts && this.roomId) {
-      this.reconnectAttempts++;
-      const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 10000);
-
-      setTimeout(() => {
-        if (this.roomId) {
-          this.connect(this.roomId).catch(console.error);
-        }
-      }, delay);
     }
   }
 
@@ -202,8 +262,7 @@ export class SignalingClient {
   }
 
   disconnect(): void {
-    this.socket?.close();
-    this.socket = null;
+    this.closeSocket();
     this.roomId = null;
     this.peerId = null;
     this.eventHandlers.clear();

@@ -15,6 +15,8 @@ function AppContent() {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [fileValidation, setFileValidation] = useState<{ error?: string; warning?: string } | null>(null);
+  // "Try again" でどちらの初期化をやり直すか決めるために保持する。
+  const [role, setRole] = useState<'sender' | 'receiver' | null>(null);
 
   const {
     status: transferStatus,
@@ -60,15 +62,18 @@ function AppContent() {
   }, [receivedFiles, transferStatus]);
 
   const handleReceiveMode = async () => {
+    setRole('receiver');
     setMode('receive');
     try {
       await initializeAsReceiver();
     } catch (err) {
+      // 画面表示は useTransfer が status/error に反映済み。ログだけ残す。
       console.error('Failed to initialize receiver:', err);
     }
   };
 
   const handleSendMode = () => {
+    setRole('sender');
     setMode('send');
   };
 
@@ -115,9 +120,43 @@ function AppContent() {
     cancel();
     reset();
     setMode('home');
+    setRole(null);
     setDigits(['', '', '', '', '', '']);
     setSelectedFiles([]);
     setFileValidation(null);
+  };
+
+  /**
+   * 失敗した転送をやり直す。マネージャを捨てて同じ役割で張り直すだけで、
+   * 相手やコードの状態（期限切れ・部屋が満員など）はサーバが判断する。
+   * 失敗すれば再び error として表示されるだけなので、ここでは判定しない。
+   */
+  const handleRetry = async () => {
+    if (role === 'receiver') {
+      reset();
+      setMode('receive');
+      try {
+        await initializeAsReceiver();
+      } catch (err) {
+        console.error('Failed to restart receiving:', err);
+      }
+      return;
+    }
+
+    const retryCode = digits.join('');
+    if (retryCode.length !== 6 || selectedFiles.length === 0) {
+      // 入力が失われている場合は送信画面からやり直してもらう。
+      reset();
+      setMode('send');
+      return;
+    }
+
+    reset();
+    try {
+      await initializeAsSender(retryCode, selectedFiles);
+    } catch (err) {
+      console.error('Failed to restart transfer:', err);
+    }
   };
 
   const handleCopyCode = async () => {
@@ -166,9 +205,11 @@ function AppContent() {
     const enteredCode = digits.join('');
     if (enteredCode.length !== 6 || selectedFiles.length === 0) return;
 
+    setRole('sender');
     try {
       await initializeAsSender(enteredCode, selectedFiles);
     } catch (err) {
+      // 画面表示は useTransfer が status/error に反映済み。ログだけ残す。
       console.error('Failed to start transfer:', err);
     }
   };
@@ -335,31 +376,53 @@ function AppContent() {
             <div className="text-center space-y-12 animate-in">
               <ConnectionStatus status={connectionStatus} error={error} />
 
-              <div
-                className="code-giant select-all cursor-pointer"
-                onClick={handleCopyCode}
-                role="button"
-                tabIndex={0}
-                aria-label={`Transfer code ${code || 'generating'}. Click to copy`}
-                onKeyDown={(e) => e.key === 'Enter' && handleCopyCode()}
-              >
-                {code || '----'}
-              </div>
+              {transferStatus === 'error' ? (
+                <div className="space-y-10" role="alert" aria-live="assertive">
+                  <div className="space-y-4">
+                    <h2 className="text-display text-2xl text-white">Connection failed</h2>
+                    <p className="text-red-400 text-sm">
+                      {error || 'Could not start receiving.'}
+                    </p>
+                  </div>
 
-              <div className="flex items-center justify-center gap-3" role="status" aria-live="polite">
-                <div className="status-pulse" aria-hidden="true" />
-                <span className="text-muted text-sm">
-                  {transferStatus === 'waiting' ? 'waiting for sender...' : 'connecting...'}
-                </span>
-              </div>
+                  <div className="flex items-center justify-center gap-4">
+                    <button onClick={handleRetry} className="btn-cosmic px-8" aria-label="Try receiving again">
+                      <span>Try again</span>
+                    </button>
+                    <button onClick={handleBack} className="btn-ghost" aria-label="Back to home">
+                      Back
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div
+                    className="code-giant select-all cursor-pointer"
+                    onClick={handleCopyCode}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Transfer code ${code || 'generating'}. Click to copy`}
+                    onKeyDown={(e) => e.key === 'Enter' && handleCopyCode()}
+                  >
+                    {code || '----'}
+                  </div>
 
-              <p className="text-dim text-xs">
-                click code to copy
-              </p>
+                  <div className="flex items-center justify-center gap-3" role="status" aria-live="polite">
+                    <div className="status-pulse" aria-hidden="true" />
+                    <span className="text-muted text-sm">
+                      {transferStatus === 'waiting' ? 'waiting for sender...' : 'connecting...'}
+                    </span>
+                  </div>
 
-              <button onClick={handleBack} className="btn-ghost" aria-label="Cancel receiving">
-                Cancel
-              </button>
+                  <p className="text-dim text-xs">
+                    click code to copy
+                  </p>
+
+                  <button onClick={handleBack} className="btn-ghost" aria-label="Cancel receiving">
+                    Cancel
+                  </button>
+                </>
+              )}
             </div>
           )}
 
@@ -505,23 +568,37 @@ function AppContent() {
 
           {/* Transferring Screen */}
           {mode === 'transferring' && (
-            <div className="w-full max-w-md text-center space-y-10 animate-in" role="status" aria-live="polite">
+            <div
+              className="w-full max-w-md text-center space-y-10 animate-in"
+              role="status"
+              aria-live={transferStatus === 'error' ? 'assertive' : 'polite'}
+            >
               <div className="space-y-4">
                 <h2 className="text-display text-2xl text-white">
-                  {transferStatus === 'connecting' ? 'Connecting...' : 'Transferring...'}
+                  {transferStatus === 'error'
+                    ? 'Transfer failed'
+                    : transferStatus === 'connecting'
+                    ? 'Connecting...'
+                    : 'Transferring...'}
                 </h2>
                 <p className="text-muted text-sm">
                   {selectedFiles.length} file{selectedFiles.length > 1 ? 's' : ''} · {formatFileSize(totalSize)}
                 </p>
               </div>
 
-              <TransferProgress
-                progress={progress.progress}
-                speed={progress.speed}
-                eta={progress.eta}
-                bytesTransferred={progress.bytesTransferred}
-                totalBytes={progress.totalBytes || totalSize}
-              />
+              {transferStatus === 'error' ? (
+                <p className="text-red-400 text-sm">
+                  {error || 'The transfer stopped unexpectedly.'}
+                </p>
+              ) : (
+                <TransferProgress
+                  progress={progress.progress}
+                  speed={progress.speed}
+                  eta={progress.eta}
+                  bytesTransferred={progress.bytesTransferred}
+                  totalBytes={progress.totalBytes || totalSize}
+                />
+              )}
 
               <div className="space-y-2">
                 {selectedFiles.map((file, i) => (
@@ -538,9 +615,20 @@ function AppContent() {
                 ))}
               </div>
 
-              <button onClick={handleBack} className="btn-ghost" aria-label="Cancel transfer">
-                Cancel
-              </button>
+              {transferStatus === 'error' ? (
+                <div className="flex items-center justify-center gap-4">
+                  <button onClick={handleRetry} className="btn-cosmic px-8" aria-label="Try the transfer again">
+                    <span>Try again</span>
+                  </button>
+                  <button onClick={handleBack} className="btn-ghost" aria-label="Back to home">
+                    Back
+                  </button>
+                </div>
+              ) : (
+                <button onClick={handleBack} className="btn-ghost" aria-label="Cancel transfer">
+                  Cancel
+                </button>
+              )}
             </div>
           )}
 
