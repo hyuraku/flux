@@ -212,8 +212,12 @@ export class ChunkManager {
       throw new Error(`Missing chunks: ${this.getMissingChunks().join(', ')}`);
     }
 
-    // Collect chunks in order
-    const chunks: ArrayBuffer[] = [];
+    // Collect chunks in order.
+    // Blob は ArrayBufferView をそのまま受け取れるので、ここではコピーしない。
+    // Blob 構築時にブラウザ側が blob storage へコピーするため、事前にバッファを
+    // slice すると同じバイト列をもう一度 JS ヒープに抱えることになる
+    // （2 GiB のファイルで 2 GiB の無駄）。
+    const chunks: BlobPart[] = [];
     let mergedBytes = 0;
     for (let i = 0; i < this.metadata.totalChunks; i++) {
       const chunk = this.receivedChunks.get(i);
@@ -221,11 +225,14 @@ export class ChunkManager {
         throw new Error(`Missing chunk ${i}`);
       }
       mergedBytes += chunk.byteLength;
-      // Ensure we get a proper ArrayBuffer (not SharedArrayBuffer)
-      const buffer = chunk.buffer instanceof ArrayBuffer
-        ? chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength)
-        : new Uint8Array(chunk).buffer;
-      chunks.push(buffer as ArrayBuffer);
+      const buffer = chunk.buffer;
+      chunks.push(
+        buffer instanceof ArrayBuffer
+          // 同じバイト列を指す view を作り直すだけ（コピーは発生しない）。
+          ? new Uint8Array(buffer, chunk.byteOffset, chunk.byteLength)
+          // SharedArrayBuffer 由来の view だけは Blob が受け付けないのでコピーする。
+          : new Uint8Array(chunk)
+      );
     }
 
     // 各チャンクは addChunk で検証済みだが、File 化の直前に合計も突き合わせる。
@@ -269,7 +276,7 @@ export class ChunkManager {
 
   // Deserialize chunk from transmission
   static deserializeChunk(data: Uint8Array | ArrayBuffer): Chunk {
-    // Ensure we have a Uint8Array
+    // Ensure we have a Uint8Array view over the input（ここではコピーしない）
     let uint8Data: Uint8Array;
     if (data instanceof ArrayBuffer) {
       uint8Data = new Uint8Array(data);
@@ -285,17 +292,16 @@ export class ChunkManager {
       throw new Error(`Invalid chunk data: too small (${uint8Data.byteLength} bytes)`);
     }
 
-    // Create a fresh ArrayBuffer copy to avoid any offset issues
-    const buffer = new ArrayBuffer(uint8Data.byteLength);
-    const bufferView = new Uint8Array(buffer);
-    for (let i = 0; i < uint8Data.byteLength; i++) {
-      bufferView[i] = uint8Data[i];
-    }
-
-    const view = new DataView(buffer);
+    // ヘッダは view 越しに読むだけで、バッファ全体を複製しない。
+    // byteOffset を渡すので、入力が既存バッファ上の部分 view でも正しく読める。
+    const view = new DataView(uint8Data.buffer, uint8Data.byteOffset, uint8Data.byteLength);
     const index = view.getUint32(0, true);
     const size = view.getUint32(4, true);
-    const chunkData = new Uint8Array(buffer.slice(8));
+
+    // ペイロードだけを 1 回コピーする。Uint8Array#slice は byteOffset 0 の
+    // 新しい ArrayBuffer を作るので、データチャネルや解凍器が入力バッファを
+    // 再利用しても、Map に入れたバイト列は影響を受けない。
+    const chunkData = uint8Data.slice(8);
 
     return { index, data: chunkData, size };
   }
