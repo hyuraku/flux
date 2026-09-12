@@ -385,6 +385,39 @@ describe('受信側の能力通知・検証・ACK', () => {
     expect(receivedFiles).toHaveLength(1);
   });
 
+  it('ファイル完成ごとにチャンクを解放しても、連続 2 ファイルが両方とも届く', async () => {
+    await setupReceiver();
+
+    const chunkManager = (manager as unknown as { chunkManager: ChunkManager }).chunkManager;
+    const fileReceivedEvents: File[] = [];
+    manager.on('file_received', (event) => fileReceivedEvents.push(event.data as File));
+
+    injectData(metadataMessage('first.txt', 3, false, 0));
+    injectData(chunkMessage(bytesOf('AAA')));
+    await drainReceiveQueue(manager);
+
+    // toFile() 直後に reset() されるので、Map は空でメタデータも消えている。
+    expect(chunkManager.receivedCount).toBe(0);
+    expect(chunkManager.getMetadata()).toBeNull();
+
+    // reset() 済みでも次のファイルの metadata は「前のファイル未完了」にならない。
+    injectData(metadataMessage('second.txt', 3, false, 1));
+    injectData(chunkMessage(bytesOf('BBB')));
+    injectData(JSON.stringify({ type: 'transfer_complete' }));
+    await drainReceiveQueue(manager);
+
+    expect(chunkManager.receivedCount).toBe(0);
+    expect(errorEvents).toHaveLength(0);
+    expect(manager.currentStatus).toBe('completed');
+
+    expect(fileReceivedEvents).toHaveLength(2);
+    expect(receivedFiles).toHaveLength(2);
+    expect(receivedFiles[0].name).toBe('first.txt');
+    expect(await blobToArray(receivedFiles[0])).toEqual(Array.from(bytesOf('AAA')));
+    expect(receivedFiles[1].name).toBe('second.txt');
+    expect(await blobToArray(receivedFiles[1])).toEqual(Array.from(bytesOf('BBB')));
+  });
+
   it('解凍後のサイズが宣言と違うとエラーになる', async () => {
     await setupReceiver();
 

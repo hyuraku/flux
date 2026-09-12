@@ -357,22 +357,6 @@ describe('TransferManager', () => {
     });
   });
 
-  describe('getReceivedFile', () => {
-    it('転送未完了時はnullを返す', () => {
-      mockChunkManager.isComplete.mockReturnValue(false);
-
-      expect(manager.getReceivedFile()).toBeNull();
-    });
-
-    it('転送完了時はファイルを返す', () => {
-      mockChunkManager.isComplete.mockReturnValue(true);
-      const mockFile = new File(['test'], 'test.txt');
-      mockChunkManager.toFile.mockReturnValue(mockFile);
-
-      expect(manager.getReceivedFile()).toBe(mockFile);
-    });
-  });
-
   describe('TransferOptions', () => {
     it('デフォルトで圧縮が有効', () => {
       const mgr = new TransferManager();

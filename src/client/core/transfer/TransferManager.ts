@@ -880,13 +880,24 @@ export class TransferManager {
 
     if (this.chunkManager.isComplete()) {
       const file = this.chunkManager.toFile();
+      const fileName = file.name;
+      const fileSize = file.size;
+
+      // メモリ対策: Blob がすでにバイト列を保持しているので、チャンク Map は
+      // ここで手放す。残しておくとファイル 1 個ぶんのバイト列を JS ヒープ側にも
+      // 二重に抱えたまま、次の metadata か cleanup まで解放されない。
+      // reset 後は getMetadata() が null になるため、handleFileMetadata の
+      // 「前のファイルが未完了」判定（previous && !isComplete()）は素通りし、
+      // 次のファイルの metadata は従来どおり受け付けられる。
+      this.chunkManager.reset();
+
       const fileIndex = this.currentFileIndex ?? 0;
       this.ackedFiles.add(fileIndex);
       this.webrtc.sendJSON({
         type: 'file_ack',
         fileIndex,
-        fileName: file.name,
-        size: file.size,
+        fileName,
+        size: fileSize,
       } as FileAckMessage);
       this.emit({ type: 'file_received', data: file });
     }
@@ -974,12 +985,5 @@ export class TransferManager {
     this.webrtcConnected = false;
     this.transferStarted = false;
     this.targetPeerId = null;
-  }
-
-  getReceivedFile(): File | null {
-    if (this.chunkManager.isComplete()) {
-      return this.chunkManager.toFile();
-    }
-    return null;
   }
 }

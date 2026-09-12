@@ -55,6 +55,38 @@ describe('ChunkManager', () => {
     it('8バイト未満のデータでエラーになる', () => {
       expect(() => ChunkManager.deserializeChunk(new Uint8Array(4))).toThrow('too small');
     });
+
+    it('ペイロードは入力バッファから独立したコピーになる', () => {
+      const chunk: Chunk = { index: 7, data: new Uint8Array([1, 2, 3, 4]), size: 4 };
+      const serialized = ChunkManager.serializeChunk(chunk);
+
+      const result = ChunkManager.deserializeChunk(serialized);
+
+      // データチャネルや解凍器が入力バッファを再利用しても壊れないこと。
+      expect(result.data.buffer).not.toBe(serialized.buffer);
+      expect(result.data.byteOffset).toBe(0);
+      expect(result.data.byteLength).toBe(4);
+
+      serialized.fill(0xff);
+      expect(toArray(result.data)).toEqual([1, 2, 3, 4]);
+    });
+
+    it('部分 view を入力してもヘッダとペイロードを正しく読む', () => {
+      const chunk: Chunk = { index: 9, data: new Uint8Array([5, 6, 7]), size: 3 };
+      const serialized = ChunkManager.serializeChunk(chunk);
+
+      // 前後にパディングを付けた大きなバッファ上の部分 view を渡す。
+      const padded = new Uint8Array(serialized.byteLength + 8);
+      padded.set(serialized, 4);
+      const view = padded.subarray(4, 4 + serialized.byteLength);
+
+      const result = ChunkManager.deserializeChunk(view);
+
+      expect(result.index).toBe(9);
+      expect(result.size).toBe(3);
+      expect(result.data.byteOffset).toBe(0);
+      expect(toArray(result.data)).toEqual([5, 6, 7]);
+    });
   });
 
   describe('split / merge ラウンドトリップ', () => {
@@ -104,6 +136,28 @@ describe('ChunkManager', () => {
 
       expect(chunks).toHaveLength(4); // 16+16+16+2
       expect(chunks[3].size).toBe(2);
+    });
+
+    it('toFile() 後に reset() してもファイルの中身は壊れない', async () => {
+      const content = 'Blob owns the bytes. '.repeat(20);
+      const file = new File([content], 'detached.txt', { type: 'text/plain' });
+
+      const cm = new ChunkManager(16);
+      cm.setMetadata(cm.createMetadata(file));
+      for await (const chunk of cm.split(file)) {
+        cm.addChunk(chunk);
+      }
+
+      const received = cm.toFile();
+      // Blob 側がすでにバイト列を持っているので、Map を捨てても読み出せる。
+      cm.reset();
+
+      expect(cm.receivedCount).toBe(0);
+      expect(cm.getMetadata()).toBeNull();
+
+      const result = await blobToArray(received);
+      expect(result).toEqual(toArray(new TextEncoder().encode(content)));
+      expect(received.name).toBe('detached.txt');
     });
   });
 
